@@ -1,6 +1,6 @@
 {
   "name": "node-red-contrib-sia-alarm-server",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Node-RED node for SIA DC-09 IP server (alarm receiver) with support for Honeywell Galaxy Dimension.",
   "keywords": ["node-red", "sia", "alarm", "security", "server", "honeywell", "galaxy"],
   "dependencies": {
@@ -9,7 +9,9 @@
   "keywords": [
         "node-red",
         "SIA",
-        "alarm"
+        "alarm",
+        "Honeywell",
+        "Galaxy"
     ],
     "repository": {
         "type": "git",
