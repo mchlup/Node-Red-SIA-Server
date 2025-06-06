@@ -1,27 +1,27 @@
 <script type="text/javascript">
-    // REGISTRACE KONFIGURAČNÍHO NODE
+    // Konfigurační node (config node)
     RED.nodes.registerType('sia-server-config', {
         category: 'config',
         defaults: {
             name: { value: "" },
-            port: { value: 10000, required: true },
-            password: { value: "123456", required: false },
-            account: { value: "999", required: false }
+            port: { value: 10002, required: true },
+            password: { value: "", required: false },
+            account: { value: "", required: false }
         },
         label: function() {
             return this.name || ("SIA Config " + this.port);
         }
     });
 
-    // REGISTRACE HLAVNÍHO NODE
+    // Hlavní node (využívá config node)
     RED.nodes.registerType('sia-server', {
-        category: 'sia-server',
+        category: 'sia-server',  // vlastní sekce v paletě
         color: '#A6BBCF',
         defaults: {
             name:      { value: "" },
-            config:    { type: "sia-server-config", required: true },
-            debugMode: { value: true, required: false },
-            rawOutput: { value: true, required: false }
+            config:    { type: "sia-server-config", required: true }, // propojení na config node
+            debugMode: { value: false, required: false },
+            rawOutput: { value: false, required: false }
         },
         inputs: 1,
         outputs: 2,
@@ -32,7 +32,7 @@
     });
 </script>
 
-<!-- Konfigurační node dialog -->
+<!-- Config node dialog -->
 <div id="node-config-sia-server-config" class="form-tab">
     <div class="form-row">
         <label for="node-config-input-name"><i class="icon-tag"></i> Název</label>
@@ -52,7 +52,7 @@
     </div>
 </div>
 
-<!-- Hlavní node dialog -->
+<!-- Main node dialog -->
 <div class="form-row">
     <label for="node-input-name"><i class="icon-tag"></i> Název</label>
     <input type="text" id="node-input-name">
