@@ -3,7 +3,7 @@ const crc = require("crc");
 
 module.exports = function (RED) {
 
-    // KONFIGURAČNÍ NODE
+    // Konfigurační node
     function SiaServerConfigNode(n) {
         RED.nodes.createNode(this, n);
         this.name = n.name;
@@ -13,7 +13,7 @@ module.exports = function (RED) {
     }
     RED.nodes.registerType("sia-server-config", SiaServerConfigNode);
 
-    // HLAVNÍ NODE
+    // Hlavní node
     function SiaServerNode(config) {
         RED.nodes.createNode(this, config);
 
