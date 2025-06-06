@@ -1,39 +1,41 @@
 <script type="text/javascript">
-    // Konfigurační node (config node)
+    // === Registrace konfiguračního node ===
     RED.nodes.registerType('sia-server-config', {
         category: 'config',
         defaults: {
-            name: { value: "" },
-            port: { value: 10002, required: true },
-            password: { value: "", required: false },
-            account: { value: "", required: false }
+            name:     { value: "" },
+            port:     { value: 10000, required: true },
+            password: { value: "",    required: false },
+            account:  { value: "123456",    required: false }
         },
         label: function() {
             return this.name || ("SIA Config " + this.port);
         }
     });
 
-    // Hlavní node (využívá config node)
+    // === Registrace hlavního node ===
     RED.nodes.registerType('sia-server', {
-        category: 'sia-server',  // vlastní sekce v paletě
-        color: '#A6BBCF',
+        category: 'sia-server',
+        color:    '#A6BBCF',
         defaults: {
             name:      { value: "" },
-            config:    { type: "sia-server-config", required: true }, // propojení na config node
-            debugMode: { value: false, required: false },
-            rawOutput: { value: false, required: false }
+            config:    { type: "sia-server-config", required: true },
+            debugMode: { value: true, required: false },
+            rawOutput: { value: true, required: false }
         },
-        inputs: 1,
+        inputs:  1,
         outputs: 2,
-        icon: "network.png",
+        icon:    "network.png",
         label: function() {
             return this.name || "SIA Server";
         }
     });
 </script>
 
-<!-- Config node dialog -->
-<div id="node-config-sia-server-config" class="form-tab">
+<!-- ============================================ -->
+<!-- Konfigurační node – editovací formulář       -->
+<!-- ============================================ -->
+<script type="text/x-red" data-template-name="sia-server-config">
     <div class="form-row">
         <label for="node-config-input-name"><i class="icon-tag"></i> Název</label>
         <input type="text" id="node-config-input-name">
@@ -43,29 +45,53 @@
         <input type="number" id="node-config-input-port" placeholder="10002">
     </div>
     <div class="form-row">
-        <label for="node-config-input-password"><i class="icon-lock"></i> Heslo/PIN (volitelné)</label>
+        <label for="node-config-input-password"><i class="icon-lock"></i> Heslo/PIN (volitelně)</label>
         <input type="text" id="node-config-input-password">
     </div>
     <div class="form-row">
-        <label for="node-config-input-account"><i class="icon-user"></i> Číslo účtu (volitelné)</label>
+        <label for="node-config-input-account"><i class="icon-user"></i> Číslo účtu (volitelně)</label>
         <input type="text" id="node-config-input-account">
     </div>
-</div>
+</script>
 
-<!-- Main node dialog -->
-<div class="form-row">
-    <label for="node-input-name"><i class="icon-tag"></i> Název</label>
-    <input type="text" id="node-input-name">
-</div>
-<div class="form-row">
-    <label for="node-input-config"><i class="icon-cog"></i> Nastavení serveru</label>
-    <input type="text" id="node-input-config">
-</div>
-<div class="form-row">
-    <label for="node-input-debugMode"><i class="icon-bug"></i> Aktivovat DEBUG režim</label>
-    <input type="checkbox" id="node-input-debugMode">
-</div>
-<div class="form-row">
-    <label for="node-input-rawOutput"><i class="icon-eye"></i> Přeposílat RAW zprávy</label>
-    <input type="checkbox" id="node-input-rawOutput">
-</div>
+<!-- ============================================ -->
+<!-- Hlavní node – editovací formulář             -->
+<!-- ============================================ -->
+<script type="text/x-red" data-template-name="sia-server">
+    <div class="form-row">
+        <label for="node-input-name"><i class="icon-tag"></i> Název</label>
+        <input type="text" id="node-input-name">
+    </div>
+    <div class="form-row">
+        <label for="node-input-config"><i class="icon-cog"></i> Nastavení serveru</label>
+        <input type="text" id="node-input-config">
+    </div>
+    <div class="form-row">
+        <label for="node-input-debugMode"><i class="icon-bug"></i> Aktivovat DEBUG režim</label>
+        <input type="checkbox" id="node-input-debugMode">
+    </div>
+    <div class="form-row">
+        <label for="node-input-rawOutput"><i class="icon-eye"></i> Přeposílat RAW zprávy</label>
+        <input type="checkbox" id="node-input-rawOutput">
+    </div>
+</script>
+
+<!-- ============================================ -->
+<!-- (Volitelně) Popis nápovědy / help text       -->
+<!-- ============================================ -->
+<script type="text/x-red" data-help-name="sia-server-config">
+    <p>
+        <b>SIA Server Config</b> – zde definujte globální nastavení vašeho SIA serveru:<br>
+        <u>Port:</u> TCP port, na kterém naslouchá SIA ústředna (výchozí 10002).<br>
+        <u>Heslo/PIN:</u> Volitelné, pokud ústředna očekává PIN pro připojení.<br>
+        <u>Číslo účtu:</u> Volitelné, slouží jako identifikace ústředny (např. "123456").
+    </p>
+</script>
+
+<script type="text/x-red" data-help-name="sia-server">
+    <p>
+        <b>SIA Server</b> – hlavní uzel, naslouchá na portu definovaném v &quot;Nastavení serveru&quot;.<br>
+        <u>Debug režim:</u> Pokud zaškrtnuto, ve druhém výstupu se objeví všechny neparsované nebo testovací zprávy.<br>
+        <u>Přeposílat RAW zprávy:</u> Pokud zaškrtnuto, ve druhém výstupu se objeví surová data každé přijaté zprávy (užitečné pro ladění).
+    </p>
+</script>
