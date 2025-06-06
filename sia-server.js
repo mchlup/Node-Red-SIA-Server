@@ -11,7 +11,7 @@ module.exports = function (RED) {
     function SiaServerConfigNode(n) {
         RED.nodes.createNode(this, n);
         this.name = n.name;
-        this.port = parseInt(n.port) || 10002;
+        this.port = parseInt(n.port) || 10000;
         this.password = n.password || "";
         this.account = n.account || "";
         // CSV → pole
@@ -27,7 +27,7 @@ module.exports = function (RED) {
         this.reconnectInterval = parseInt(n.reconnectInterval) || 10;
         this.allowedUsers = (n.allowedUsers || "").split(",").map(s => s.trim()).filter(s => s);
         this.language = n.language || "en";
-        this.autoRespondPolling = n.autoRespondPolling || false;
+        this.autoRespondPolling = n.autoRespondPolling || true;
         this.pollResponseTemplate = n.pollResponseTemplate || "P#${account}";
     }
     RED.nodes.registerType("sia-server-config", SiaServerConfigNode);
@@ -58,8 +58,8 @@ module.exports = function (RED) {
         const language = nodeConfig.language;
         const autoRespondPolling = nodeConfig.autoRespondPolling;
         const pollResponseTemplate = nodeConfig.pollResponseTemplate;
-        const debugMode = config.debugMode || false;
-        const rawOutput = config.rawOutput || false;
+        const debugMode = config.debugMode || true;
+        const rawOutput = config.rawOutput || true;
 
         let clientSockets = [];
         let server = null;
