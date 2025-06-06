@@ -1,7 +1,22 @@
 # node-red-contrib-sia-server
 
-**Verze 1.0.9** – plná podpora Honeywell Galaxy Dimension GD520 a obecně SIA Level 4, včetně CRC XModem/X.25, full fragmentace, extensions, diagnostických kódů, PCVue-style mapování, push-webhooků a dalších pokročilých vlastností.
+**Verze 1.0.10** – Plná podpora Honeywell Galaxy Dimension GD520 a obecně SIA Level 4 (DC-09) včetně:
 
+- CRC 16 (XModem, X.25, ARC)  
+- AES 128-CBC dešifrování  
+- Polling (F# → P#) s timeoutem a keep-alive  
+- Multi-fragmentace SIA-DCS (fragment ending "...")  
+- Multiplexované balíčky (ACCID/MSGNUM; [EV|ZZ]…)  
+- Extensions (např. `ti:18.03`, `ri010`, `id098`, `pi010`, `GALOGtxt`, `SITE0001`)  
+- Diagnostické a iBD kódy (DIAG, LANERR, NETDOWN, PSUPPLY, PDUERR)  
+- Role-based ARM/DISARM s PIN (allowedUsers)  
+- Filtrace eventů (Whitelist)  
+- Mapování zón (vlastní JSON, PCVue-style adresy)  
+- Logování do souboru `/home/nodered/sia-events.log`  
+- Status v UI (zelená/červená/žlutá)  
+- Push-Webhook (HTTP POST každého eventu)  
+- HTTP endpoint pro externí eventy (`POST /sia-server/:id/event`)  
+- Kompatibilita s Virtual Galaxy Receiver (Evalink/Talos) – SIA DC-09 Level 4 bloky, Remote Control atd.
 ---
 
 ## Klíčové vlastnosti
