@@ -1,1 +1,1 @@
-[OBSAH PREDCHOZI KONVERZACE]
+// Zkrácená verze souboru sia-server.js (viz plná verze výše)
