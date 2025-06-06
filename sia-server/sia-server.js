@@ -167,4 +167,14 @@ module.exports = function (RED) {
     }
 
     RED.nodes.registerType("sia-server", SiaServerNode);
+
+    // Config node
+    function SiaServerConfigNode(n) {
+        RED.nodes.createNode(this, n);
+        this.name = n.name;
+        this.port = n.port;
+        this.password = n.password;
+        this.account = n.account;
+    }
+    RED.nodes.registerType("sia-server-config", SiaServerConfigNode);
 };
