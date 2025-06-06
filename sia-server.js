@@ -11,7 +11,7 @@ module.exports = function (RED) {
     function SiaServerConfigNode(n) {
         RED.nodes.createNode(this, n);
         this.name = n.name;
-        this.port = parseInt(n.port) || 10000;
+        this.port = parseInt(n.port) || 10002;
         this.password = n.password || "";
         this.account = n.account || "";
         // CSV → pole
@@ -28,7 +28,7 @@ module.exports = function (RED) {
         this.allowedUsers = (n.allowedUsers || "").split(",").map(s => s.trim()).filter(s => s);
         this.language = n.language || "en";
         this.autoRespondPolling = n.autoRespondPolling || false;
-        this.pollResponseTemplate = n.pollResponseTemplate || "P#${zone}";
+        this.pollResponseTemplate = n.pollResponseTemplate || "P#${account}";
     }
     RED.nodes.registerType("sia-server-config", SiaServerConfigNode);
 
@@ -48,7 +48,7 @@ module.exports = function (RED) {
         const node = this;
         const port = nodeConfig.port;
         const password = nodeConfig.password;
-        const account = nodeConfig.account;
+        const accountDefault = nodeConfig.account;
         const allowedEvents = nodeConfig.allowedEvents;
         const zoneMap = nodeConfig.zoneMap;
         const useAes = nodeConfig.useAes;
@@ -58,8 +58,8 @@ module.exports = function (RED) {
         const language = nodeConfig.language;
         const autoRespondPolling = nodeConfig.autoRespondPolling;
         const pollResponseTemplate = nodeConfig.pollResponseTemplate;
-        const debugMode = config.debugMode || true;
-        const rawOutput = config.rawOutput || true;
+        const debugMode = config.debugMode || false;
+        const rawOutput = config.rawOutput || false;
 
         let clientSockets = [];
         let server = null;
@@ -102,18 +102,17 @@ module.exports = function (RED) {
                     let frames = data.split("\r\n").filter(x => x.trim().length > 0);
                     for (let frame of frames) {
                         node.log(`Přijato (raw): ${frame}`);
-                        let sia = tryParseSia(frame, password, account);
+                        let sia = tryParseSia(frame, password, accountDefault);
                         if (sia.valid) {
                             // === Polling ===
                             if (sia.protocol === "GATEWAY-POLL") {
-                                sia.localizedMessage = localize("POLL", sia.zone);
+                                sia.localizedMessage = localize("POLL", sia.account);
 
                                 // Automatická odpověď na polling
                                 if (autoRespondPolling) {
-                                    // Vytvoříme odpověď podle šablony (např. "P#${zone}")
                                     let resp = pollResponseTemplate
-                                                .replace("${zone}", sia.zone)
-                                                .replace("${account}", sia.account);
+                                                .replace("${account}", sia.account)
+                                                .replace("${zone}", sia.zone || "");
                                     socket.write(resp + "\r\n");
                                     node.log(`Odesílám polling ack: ${resp}`);
                                 }
@@ -133,12 +132,11 @@ module.exports = function (RED) {
                                 let ack = buildAck(sia.sequence, sia.account);
                                 node.log(`Odesílám ACK: ${ack.trim()}`);
                                 socket.write(ack);
-                            } else if (sia.protocol === "ADM-CID") {
-                                // Contact-ID – po ověření CRC neodesíláme ACK, Contact-ID používá vlastní mechanismus
                             }
+                            // U ADM-CID (Contact-ID) se neodesílá ACK, používá se CRC
 
                             // Mapování zón
-                            if (zoneMap[sia.zone]) {
+                            if (sia.zone && zoneMap[sia.zone]) {
                                 sia.zoneName = zoneMap[sia.zone];
                             }
                             // Lokalizace
@@ -151,7 +149,6 @@ module.exports = function (RED) {
                         } else {
                             // === Chybný formát / CRC / neznámé ===
                             node.warn(`Chyba parsování: ${sia.error}`);
-                            // Odešleme NAK pouze u SIA-DCS
                             if (sia.protocol === "SIA-DCS") {
                                 let nak = buildNak(sia.sequence);
                                 node.log(`Odesílám NAK: ${nak.trim()}`);
@@ -234,7 +231,7 @@ module.exports = function (RED) {
                 if ((cmd === "ARM" || cmd === "DISARM") && allowedUsers.length && !allowedUsers.includes(userCode)) {
                     throw new Error(localize("UNAUTHORIZED", ""));
                 }
-                let destAccount = msg.payload.account || account;
+                let destAccount = msg.payload.account || accountDefault;
                 let partition   = msg.payload.partition || "";
                 let customFrame = msg.payload.customFrame || "";
                 if (clientSockets.length === 0) {
@@ -336,10 +333,13 @@ module.exports = function (RED) {
                 if (raw.startsWith("F#")) {
                     result.protocol = "GATEWAY-POLL";
                     result.sequence = null;
-                    // Zona v tomto případě obsahuje účet + případné další znaky
-                    // Pro jednoduchost vezmeme až do prvního ne-cisla
-                    let zoneMatch = raw.slice(2).match(/^\d+/);
-                    result.zone = zoneMatch ? zoneMatch[0] : raw.slice(2);
+                    // Vše po "F#" považujeme za account
+                    let acctVal = raw.slice(2).trim();
+                    // Některé alarmy přidávají netisknutelné znaky—odstraníme pouze číslice
+                    let acctMatch = acctVal.match(/^\d+/);
+                    result.account = acctMatch ? acctMatch[0] : acctVal;
+                    result.zone = null;
+                    result.event = "POLL";
                     result.message = "Polling / keep-alive frame";
                     result.valid = true;
                     return result;
@@ -410,7 +410,6 @@ module.exports = function (RED) {
         // Funkce: logování událostí do souboru
         // =======================================
         function logEvent(sia) {
-            // Uložíme do /home/nodered/sia-events.log
             let logline = `${new Date().toISOString()},${sia.account},${sia.event},${sia.zone},${sia.message}\n`;
             fs.appendFile("/home/nodered/sia-events.log", logline, err => {
                 if (err) node.error("Chyba při zapisování logu: " + err);
@@ -437,13 +436,13 @@ module.exports = function (RED) {
                 let sia = {
                     protocol: "EXTERNAL",
                     sequence: null,
-                    account: account,
+                    account: accountDefault,
                     event: payload.event,
                     zone: payload.zone,
                     message: payload.message,
                     valid: true
                 };
-                node.send([{ payload: sia, raw: JSON.stringify(payload), account: account, timestamp: new Date().toISOString() }, null]);
+                node.send([{ payload: sia, raw: JSON.stringify(payload), account: accountDefault, timestamp: new Date().toISOString() }, null]);
                 res.sendStatus(200);
             } else {
                 res.sendStatus(404);
