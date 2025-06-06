@@ -1,32 +1,36 @@
 <script type="text/javascript">
-    // =========================================
-    // Registrace konfiguračního node (sia-server-config)
-    // =========================================
+    // ================================================
+    // Registrace konfiguračního node "sia-server-config"
+    // ================================================
     RED.nodes.registerType('sia-server-config', {
         category: 'config',
         defaults: {
-            name:               { value: "" },
-            port:               { value: 10000, required: true },
-            account:            { value: "",      required: false },
-            receiverID:         { value: "",      required: false },
-            allowedEvents:      { value: "",      required: false },
-            zoneMap:            { value: "",      required: false },
-            useAes:             { value: false,   required: false },
-            aesKey:             { value: "",      required: false },
-            reconnectInterval:  { value: 10,      required: false },
-            allowedUsers:       { value: "",      required: false },
-            language:           { value: "en",    required: false },
-            autoRespondPolling: { value: false,   required: false },
-            pollResponseTemplate: { value: "P#${account}", required: false }
+            name:                  { value: "" },
+            port:                  { value: 10000,    required: true },
+            account:               { value: "",       required: false },
+            receiverID:            { value: "",       required: false },
+            allowedEvents:         { value: "",       required: false },
+            zoneMap:               { value: "",       required: false },
+            useAes:                { value: false,    required: false },
+            aesKey:                { value: "",       required: false },
+            reconnectInterval:     { value: 10,       required: false },
+            allowedUsers:          { value: "",       required: false },
+            language:              { value: "en",     required: false },
+            crcMethod:             { value: "xmodem", required: false },
+            ackTimeoutMs:          { value: 2000,     required: false },
+            keepAliveIntervalMs:   { value: 60000,    required: false },
+            autoRespondPolling:    { value: false,    required: false },
+            pollResponseTemplate:  { value: "P#${account}", required: false },
+            pushWebhookUrl:        { value: "",       required: false }
         },
         label: function() {
             return this.name || ("SIA Config " + this.port);
         }
     });
 
-    // =========================================
-    // Registrace hlavního node (sia-server)
-    // =========================================
+    // ================================================
+    // Registrace hlavního node "sia-server"
+    // ================================================
     RED.nodes.registerType('sia-server', {
         category: 'sia-server',
         color:    '#A6BBCF',
@@ -34,7 +38,7 @@
             name:      { value: "" },
             config:    { type: "sia-server-config", required: true },
             debugMode: { value: true, required: false },
-            rawOutput: { value: true, required: false }
+            rawOutput: { value: false, required: false }
         },
         inputs:  1,
         outputs: 2,
@@ -45,9 +49,9 @@
     });
 </script>
 
-<!-- ========================================= -->
-<!-- Konfigurační node – editovací formulář     -->
-<!-- ========================================= -->
+<!-- ================================================ -->
+<!-- Konfigurační node – formulář (sia-server-config)  -->
+<!-- ================================================ -->
 <script type="text/x-red" data-template-name="sia-server-config">
     <div class="form-row">
         <label for="node-config-input-name"><i class="icon-tag"></i> Název konfigurace</label>
@@ -97,6 +101,21 @@
         </select>
     </div>
     <div class="form-row">
+        <label for="node-config-input-crcMethod"><i class="icon-code"></i> CRC metoda</label>
+        <select id="node-config-input-crcMethod">
+            <option value="xmodem">CRC-16 XModem (výchozí)</option>
+            <option value="x25">CRC-16 X.25</option>
+        </select>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-ackTimeoutMs"><i class="icon-time"></i> Timeout po ACK (ms)</label>
+        <input type="number" id="node-config-input-ackTimeoutMs" placeholder="2000">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-keepAliveIntervalMs"><i class="icon-lifebuoy"></i> Keep-alive interval (ms)</label>
+        <input type="number" id="node-config-input-keepAliveIntervalMs" placeholder="60000">
+    </div>
+    <div class="form-row">
         <label for="node-config-input-autoRespondPolling"><i class="icon-repeat"></i> Automatická odpověď na polling</label>
         <input type="checkbox" id="node-config-input-autoRespondPolling">
     </div>
@@ -104,11 +123,15 @@
         <label for="node-config-input-pollResponseTemplate"><i class="icon-pencil"></i> Šablona odpovědi (např. P#${account})</label>
         <input type="text" id="node-config-input-pollResponseTemplate" placeholder="P#${account}">
     </div>
+    <div class="form-row">
+        <label for="node-config-input-pushWebhookUrl"><i class="icon-link"></i> Push Webhook URL (volitelné)</label>
+        <input type="text" id="node-config-input-pushWebhookUrl" placeholder="https://example.com/webhook">
+    </div>
 </script>
 
-<!-- ========================================= -->
-<!-- Hlavní node – editovací formulář           -->
-<!-- ========================================= -->
+<!-- ================================================ -->
+<!-- Hlavní node – formulář (sia-server)               -->
+<!-- ================================================ -->
 <script type="text/x-red" data-template-name="sia-server">
     <div class="form-row">
         <label for="node-input-name"><i class="icon-tag"></i> Název uzlu</label>
@@ -128,46 +151,105 @@
     </div>
 </script>
 
-<!-- ========================================= -->
-<!-- Nápověda pro konfigurační node             -->
-<!-- ========================================= -->
+<!-- ================================================ -->
+<!-- Nápověda pro konfigurační node                    -->
+<!-- ================================================ -->
 <script type="text/x-red" data-help-name="sia-server-config">
     <p>
-        <b>SIA Server Config</b> – sdílená konfigurace serveru:
-        <ul>
-          <li><b>Port:</b> TCP port, na kterém naslouchá ústředna (výchozí 10002).</li>
-          <li><b>Account ID:</b> (volitelné) SIA‐ID ústředny (např. „000997“). Pokud zde není, použije se automaticky prvních několik číslic z polling rámce.</li>
-          <li><b>Receiver ID:</b> (volitelné) ID, které posíláme jako druhý parametr v ACK. Pokud není zadáno, použije se stejné jako Account ID.</li>
-          <li><b>Povolené události:</b> CSV (např. „BA,BF,GC“) – ostatní se ignorují.</li>
-          <li><b>Mapování zón:</b> JSON objekt pro přeložení čísel zón (např. {"01":"Vchod","02":"Garáž"}).</li>
-          <li><b>Použít AES:</b> Zaškrtněte, pokud ústředna posílá šifrované zprávy (AES-128-CBC).</li>
-          <li><b>AES klíč:</b> Hexadecimální řetězec 16 bajtů (32 znaků), pokud je AES aktivní.</li>
-          <li><b>Interval obnovení:</b> Počet sekund, po kterých se pokusí server znovu naslouchat po chybě nebo odpojení.</li>
-          <li><b>Povolení uživatelé:</b> CSV kódů (např. „0001,0002“) – ARM/DISARM jen od těchto kódů.</li>
-          <li><b>Jazyk:</b> Lokalizace textových zpráv v UI (en/cs).</li>
-          <li><b>Automatická odpověď na polling:</b> Pokud zaškrtnuto, po přijetí „F#…“ server odešle ack podle šablony.</li>
-          <li><b>Šablona odpovědi:</b> Například <code>P#${account}</code>. Podporuje <code>${account}</code> (z polling) a <code>${zone}</code> (pokud polling obsahuje suffix).</li>
-        </ul>
+      <b>SIA Server Config</b> – sdílená konfigurace:
+      <ul>
+        <li><b>Port:</b> TCP port, na kterém naslouchá ústředna (výchozí 10002).</li>
+        <li><b>Account ID:</b> (volitelné) SIA-ID ústředny (např. „000997“). Pokud není zadáno, parser ho vezme z polling rámce.</li>
+        <li><b>Receiver ID:</b> (volitelné) ID, které se vrací v ACK jako druhý parametr. Pokud není zadáno, použije se Account ID.</li>
+        <li><b>Povolené události:</b> CSV event kódů (např. „BA,BF,GC“) – ostatní se ignorují.</li>
+        <li><b>Mapování zón:</b> JSON objekt pro přeložení čísel zón (např. {"01":"Vchod"}).</li>
+        <li><b>Použít AES:</b> Zaškrtněte, pokud ústředna posílá šifrované SIA rámce (AES-128-CBC).</li>
+        <li><b>AES klíč:</b> Hexadecimální řetězec 16 bajtů (32 znaků), pokud je AES aktivní.</li>
+        <li><b>Interval obnovení:</b> Počet sekund, po kterých se server pokusí restartovat naslouchání po chybě či odpojení.</li>
+        <li><b>Povolení uživatelé:</b> CSV PIN kódů (např. „0001,0002“) – ARM/DISARM jen od těchto uživatelů.</li>
+        <li><b>Jazyk:</b> Lokalizace textů („en“ / „cs“).</li>
+        <li><b>CRC metoda:</b> Vyberte „xmodem“ (výchozí) nebo „x25“, podle manuálu ústředny.</li>
+        <li><b>Timeout po ACK (ms):</b> Čas v ms (výchozí 2000), po kterém, pokud po ACK nepřijde platné SIA-DCS, server uzavře socket.</li>
+        <li><b>Keep-alive interval (ms):</b> Čas v ms (výchozí 60000). Server posílá „F#<ReceiverID>“ pokud od ústředny nepřijde žádný paket.</li>
+        <li><b>Automatická odpověď na polling:</b> Pokud je zaškrtnuto, po přijetí „F#…“ server odešle ACK podle šablony.</li>
+        <li><b>Šablona odpovědi:</b> Např. <code>P#${account}</code>, podporuje <code>${account}</code> a <code>${zone}</code> (popř. <code>${suffix}</code>).</li>
+        <li><b>Push Webhook URL:</b> (volitelné) Pošle JSON eventu na uvedenou URL (HTTP POST).</li>
+      </ul>
     </p>
 </script>
 
-<!-- ========================================= -->
-<!-- Nápověda pro hlavní node                   -->
-<!-- ========================================= -->
+<!-- ================================================ -->
+<!-- Nápověda pro hlavní node                          -->
+<!-- ================================================ -->
 <script type="text/x-red" data-help-name="sia-server">
     <p>
       <b>SIA Server</b> – uzel naslouchá TCP portu a zpracovává:
       <ul>
-        <li><b>Polling („F#…“ → „P#…“):</b> keep-alive, server automaticky odpoví podle šablony a ústředna začne posílat SIA-DCS eventy.</li>
-        <li><b>SIA-DCS (DC-09 Level 4):</b> podpora volitelného CRC-16, multi-fragmentace, diagnostické („DIAG“) zprávy, lokalizace, mapování zón.</li>
-        <li><b>Contact-ID (ADM-CID):</b> ověření CRC-16, payload „event=… zone=… user=…“ se parsuje a předává jako objekt.</li>
-        <li><b>AES-128-CBC:</b> dešifrování, pokud je aktivní (prefix „AES#“ + IV + ciphertext v hex).</li>
-        <li><b>Timeout po ACK:</b> pokud do 2 s nepřijde první SIA-DCS event, socket se uzavře a server se znovu pokusí naslouchat.</li>
-        <li><b>Keep-alive od serveru:</b> pokud 60 s nepřijde žádný paket, server pošle „F#<receiverID>“ pro udržení spojení.</li>
-        <li><b>Role-based ARM/DISARM:</b> pouze kódy z CSV ‚Povolení uživatelé‘ mají právo posílat ARM/DISARM COMMAND.</li>
-        <li><b>Status v UI:</b> zelená = naslouchá, červená = odpojeno, žlutá = chybný formát (CRC, neznámý).</li>
-        <li><b>HTTP endpoint:</b> POST /sia-server/:id/event → externí injektování eventů.</li>
-        <li><b>Logování:</b> všechny validní události se ukládají do „/home/nodered/sia-events.log“.</li>
+        <li><b>Polling (F# → P#):</b>  
+            <ul>
+              <li>Ústředna posílá <code>F#<Account><Suffix?></code>.</li>
+              <li>Server při <code>autoRespondPolling</code> odešle <code>P#<Account>\r\n</code> (nebo podle šablony) a ústředna začne posílat SIA-DCS eventy.</li>
+              <li>Pokud do <code>ackTimeoutMs</code> ms nepřijde validní SIA-DCS event, uzavře se socket a ústředna znovu pošle <code>F#…</code>.</li>
+              <li>Server také každých <code>keepAliveIntervalMs</code> ms posílá <code>F#<ReceiverID>\r\n</code>, pokud nic od ústředny neobdržel, aby udržel spojení.</li>
+            </ul>
+        </li>
+        <li><b>SIA-DCS (DC-09 Level 4):</b>  
+            <ul>
+              <li>Parsuje payload <code>[EVENT|ZONE:PART]Message</code>.</li>
+              <li>Podpora volitelného <b>CRC-16</b> (XModem nebo X.25) – pokud extistuje na konci rámce, ověří se.</li>
+              <li>Podpora <b>multi-fragmentace</b> – pokud řetězec končí „…“, akumuluje se do `pendingFragment` a čeká na další část.</li>
+              <li>Podpora <b>extensions</b> (za základním payloadem oddělené „|“), např. <code>EXTENSION=BatteryLow|TIMESTAMP=20250607T134500</code>.</li>
+              <li>Podpora <b>DIAG</b> – diagnostické pakety <code>[DIAG|…]…</code>.</li>
+              <li>Podpora iBD eventů (např. <code>LANERR</code>, <code>NETDOWN</code>) – lze rozšířit o vlastní seznam diagnostických kódů.</li>
+              <li>Po úspěšném parsování (a případné verifikaci CRC) se odešle <code>ACK <seq> <ReceiverID>\r\n</code> a event se pošle do prvního výstupu.</li>
+            </ul>
+        </li>
+        <li><b>Contact-ID (ADM-CID):</b>  
+            <ul>
+              <li>Parsuje payload typu <code>event=… zone=… user=…</code> s ověřením CRC-16.</li>
+              <li>Neodesílá ACK (Contact-ID používá vlastní protokol). Po validaci se event pošle do prvního výstupu.</li>
+            </ul>
+        </li>
+        <li><b>Push-Webhook (volitelné):</b>  
+            <ul>
+              <li>Pokud je <code>pushWebhookUrl</code> zadán, pošle se každý validní event (SIA-DCS i Contact-ID) jako JSON do této URL metodou HTTP POST.</li>
+            </ul>
+        </li>
+        <li><b>Role-based ARM/DISARM:</b>  
+            <ul>
+              <li>Pro příkazy <code>payload.action = "ARM"</code> nebo <code>"DISARM"</code> server kontroluje, zda <code>payload.code</code> je v <code>allowedUsers</code>. Jinak vrátí chybu.</li>
+            </ul>
+        </li>
+        <li><b>Filtrace eventů:</b>  
+            <ul>
+              <li>Pokud je <code>allowedEvents</code> neprázdné, přijmou se pouze event kódy z toho seznamu.</li>
+            </ul>
+        </li>
+        <li><b>Mapování zón:</b>  
+            <ul>
+              <li>Čísla zón se přeloží podle JSON <code>zoneMap</code>.</li>
+            </ul>
+        </li>
+        <li><b>Logování:</b>  
+            <ul>
+              <li>Každá validní událost se zapíše do <code>/home/nodered/sia-events.log</code> ve formátu <code>ISO8601,Account,Event,Zone,Message,Extensions_JSON</code>.</li>
+            </ul>
+        </li>
+        <li><b>Status v UI:</b>  
+            <ul>
+              <li>Zelená tečka = server naslouchá.</li>
+              <li>Červený kroužek = odpojeno.</li>
+              <li>Žlutý kroužek = chyba parsování nebo CRC (např. „SIA-CSD CRC mismatch“).</li>
+            </ul>
+        </li>
+        <li><b>HTTP endpoint:</b>  
+            <ul>
+              <li><code>POST /sia-server/:id/event</code>  
+                  - Vyžaduje právo <code>sia-server.write</code>.  
+                  - Tělo JSON: <code>{"event":"BA","zone":"03","message":"Test"}</code>.  
+                  - Server vygeneruje event do prvního výstupu.</li>
+            </ul>
+        </li>
       </ul>
     </p>
 </script>
