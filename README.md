@@ -1,1 +1,3 @@
-[OBSAH README.md]
+# node-red-contrib-sia-server
+
+Popis a instalace viz předchozí instrukce…

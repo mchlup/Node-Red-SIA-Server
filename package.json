@@ -1,1 +1,14 @@
-[OBSAH package.json]
+{
+  "name": "node-red-contrib-sia-server",
+  "version": "1.0.0",
+  "description": "Node-RED node for SIA DC-09 IP server (alarm receiver) with support for Honeywell Galaxy Dimension.",
+  "keywords": ["node-red", "sia", "alarm", "security", "server", "honeywell", "galaxy"],
+  "dependencies": {
+    "crc": "^3.8.0"
+  },
+  "node-red": {
+    "nodes": {
+      "sia-server": "sia-server/sia-server.js"
+    }
+  }
+}
