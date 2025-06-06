@@ -1,20 +1,35 @@
-
-/** 
- * SIA Server Node-RED node
- * Plná podpora SIA DC-09 (Level 3/4) pro Honeywell Galaxy Dimension 520.
- * Rozšířený DEBUG režim, ACK/NAK, raw output, zpětné ovládání.
- */
-
 const net = require("net");
 const crc = require("crc");
 
 module.exports = function (RED) {
+
+    // KONFIGURAČNÍ NODE
+    function SiaServerConfigNode(n) {
+        RED.nodes.createNode(this, n);
+        this.name = n.name;
+        this.port = n.port;
+        this.password = n.password;
+        this.account = n.account;
+    }
+    RED.nodes.registerType("sia-server-config", SiaServerConfigNode);
+
+    // HLAVNÍ NODE
     function SiaServerNode(config) {
         RED.nodes.createNode(this, config);
+
+        // Získání konfiguračního node podle ID
+        const nodeConfig = RED.nodes.getNode(config.config);
+
+        // Pokud není přiřazen config node, skončíme
+        if (!nodeConfig) {
+            this.error("Není přiřazen žádný konfigurační node!");
+            return;
+        }
+
         const node = this;
-        const port       = parseInt(config.port) || 10002;
-        const password   = config.password || "";
-        const account    = config.account || "";
+        const port       = parseInt(nodeConfig.port) || 10002;
+        const password   = nodeConfig.password || "";
+        const account    = nodeConfig.account || "";
         const debugMode  = config.debugMode || false;
         const rawOutput  = config.rawOutput || false;
 
@@ -131,7 +146,7 @@ module.exports = function (RED) {
             };
 
             try {
-                let siaRe = /^(SIA-DCS|ADM-CID)\s+([0-9A-Fa-f]+)?\s*(\d+)?\s*\"(.*)\"$/;
+                let siaRe = /^(SIA-DCS|ADM-CID)\s+([0-9A-Fa-f]+)?\s*(\d+)?\s*"(.*)"$/;
                 let m = siaRe.exec(frame.trim());
                 if (!m) {
                     result.error = "Špatný formát (ne SIA-DCS/ADM-CID).";
@@ -167,14 +182,4 @@ module.exports = function (RED) {
     }
 
     RED.nodes.registerType("sia-server", SiaServerNode);
-
-    // Config node
-    function SiaServerConfigNode(n) {
-        RED.nodes.createNode(this, n);
-        this.name = n.name;
-        this.port = n.port;
-        this.password = n.password;
-        this.account = n.account;
-    }
-    RED.nodes.registerType("sia-server-config", SiaServerConfigNode);
 };
