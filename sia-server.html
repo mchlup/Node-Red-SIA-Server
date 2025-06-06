@@ -5,12 +5,12 @@
         defaults: {
             name:      { value: "" },
             port:      { value: 10002, required: true },
-            password:  { value: "",      required: false },
-            account:   { value: "",      required: false },
-            debugMode: { value: false,   required: false },
-            rawOutput: { value: false,   required: false }
+            password:  { value: "",    required: false },
+            account:   { value: "",    required: false },
+            debugMode: { value: false, required: false },
+            rawOutput: { value: false, required: false }
         },
-        inputs:  1,
+        inputs: 1,
         outputs: 2,
         icon: "network.png",
         label: function () {
@@ -20,26 +20,26 @@
 </script>
 
 <div class="form-row">
-  <label for="node-input-name"><i class="icon-tag"></i> Název</label>
-  <input type="text" id="node-input-name">
+    <label for="node-input-name"><i class="icon-tag"></i> Název</label>
+    <input type="text" id="node-input-name">
 </div>
 <div class="form-row">
-  <label for="node-input-port"><i class="icon-globe"></i> Port (TCP)</label>
-  <input type="number" id="node-input-port" placeholder="10002">
+    <label for="node-input-port"><i class="icon-globe"></i> Port (TCP)</label>
+    <input type="number" id="node-input-port" placeholder="10002">
 </div>
 <div class="form-row">
-  <label for="node-input-password"><i class="icon-lock"></i> Heslo/PIN (volitelné)</label>
-  <input type="text" id="node-input-password">
+    <label for="node-input-password"><i class="icon-lock"></i> Heslo/PIN (volitelné)</label>
+    <input type="text" id="node-input-password">
 </div>
 <div class="form-row">
-  <label for="node-input-account"><i class="icon-user"></i> Číslo účtu (volitelné)</label>
-  <input type="text" id="node-input-account">
+    <label for="node-input-account"><i class="icon-user"></i> Číslo účtu (volitelné)</label>
+    <input type="text" id="node-input-account">
 </div>
 <div class="form-row">
-  <label for="node-input-debugMode"><i class="icon-bug"></i> Aktivovat DEBUG režim</label>
-  <input type="checkbox" id="node-input-debugMode">
+    <label for="node-input-debugMode"><i class="icon-bug"></i> Aktivovat DEBUG režim</label>
+    <input type="checkbox" id="node-input-debugMode">
 </div>
 <div class="form-row">
-  <label for="node-input-rawOutput"><i class="icon-eye"></i> Přeposílat RAW zprávy</label>
-  <input type="checkbox" id="node-input-rawOutput">
+    <label for="node-input-rawOutput"><i class="icon-eye"></i> Přeposílat RAW zprávy</label>
+    <input type="checkbox" id="node-input-rawOutput">
 </div>
