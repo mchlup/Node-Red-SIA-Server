@@ -1,27 +1,27 @@
 <script type="text/javascript">
-    // Konfigurační node (configuration node)
+    // REGISTRACE KONFIGURAČNÍHO NODE
     RED.nodes.registerType('sia-server-config', {
         category: 'config',
         defaults: {
             name: { value: "" },
-            port: { value: 10002, required: true },
-            password: { value: "", required: false },
-            account: { value: "", required: false }
+            port: { value: 10000, required: true },
+            password: { value: "123456", required: false },
+            account: { value: "999", required: false }
         },
         label: function() {
-            return this.name || "SIA Config";
+            return this.name || ("SIA Config " + this.port);
         }
     });
 
-    // Hlavní node - používá config node
+    // REGISTRACE HLAVNÍHO NODE
     RED.nodes.registerType('sia-server', {
         category: 'input',
         color: '#A6BBCF',
         defaults: {
             name:      { value: "" },
             config:    { type: "sia-server-config", required: true },
-            debugMode: { value: false, required: false },
-            rawOutput: { value: false, required: false }
+            debugMode: { value: true, required: false },
+            rawOutput: { value: true, required: false }
         },
         inputs: 1,
         outputs: 2,
