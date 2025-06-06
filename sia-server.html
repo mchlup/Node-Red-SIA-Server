@@ -1,36 +1,40 @@
 <script type="text/javascript">
-    // === Registrace konfiguračního node ===
+    // =========================================
+    // Registrace konfiguračního node (sia-server-config)
+    // =========================================
     RED.nodes.registerType('sia-server-config', {
         category: 'config',
         defaults: {
-            name:              { value: "" },
-            port:              { value: 10000, required: true },
-            password:          { value: "",      required: false },
-            account:           { value: "000997",      required: false },
-            allowedEvents:     { value: "",      required: false },
-            zoneMap:           { value: "",      required: false },
-            useAes:            { value: false,   required: false },
-            aesKey:            { value: "",      required: false },
-            reconnectInterval: { value: 10,      required: false },
-            allowedUsers:      { value: "",      required: false },
-            language:          { value: "en",    required: false },
-            autoRespondPolling:{ value: false,   required: false },
-            pollResponseTemplate: { value: "P#${zone}", required: false }
+            name:               { value: "" },
+            port:               { value: 10000, required: true },
+            account:            { value: "",      required: false },
+            receiverID:         { value: "",      required: false },
+            allowedEvents:      { value: "",      required: false },
+            zoneMap:            { value: "",      required: false },
+            useAes:             { value: false,   required: false },
+            aesKey:             { value: "",      required: false },
+            reconnectInterval:  { value: 10,      required: false },
+            allowedUsers:       { value: "",      required: false },
+            language:           { value: "en",    required: false },
+            autoRespondPolling: { value: false,   required: false },
+            pollResponseTemplate: { value: "P#${account}", required: false }
         },
         label: function() {
             return this.name || ("SIA Config " + this.port);
         }
     });
 
-    // === Registrace hlavního node ===
+    // =========================================
+    // Registrace hlavního node (sia-server)
+    // =========================================
     RED.nodes.registerType('sia-server', {
         category: 'sia-server',
         color:    '#A6BBCF',
         defaults: {
             name:      { value: "" },
             config:    { type: "sia-server-config", required: true },
-            debugMode: { value: false, required: false },
-            rawOutput: { value: false, required: false }
+            debugMode: { value: true, required: false },
+            rawOutput: { value: true, required: false }
         },
         inputs:  1,
         outputs: 2,
@@ -41,9 +45,9 @@
     });
 </script>
 
-<!-- ============================================ -->
-<!-- Konfigurační node – editovací formulář       -->
-<!-- ============================================ -->
+<!-- ========================================= -->
+<!-- Konfigurační node – editovací formulář     -->
+<!-- ========================================= -->
 <script type="text/x-red" data-template-name="sia-server-config">
     <div class="form-row">
         <label for="node-config-input-name"><i class="icon-tag"></i> Název konfigurace</label>
@@ -54,12 +58,12 @@
         <input type="number" id="node-config-input-port" placeholder="10002">
     </div>
     <div class="form-row">
-        <label for="node-config-input-password"><i class="icon-lock"></i> Heslo/PIN (volitelné)</label>
-        <input type="password" id="node-config-input-password">
+        <label for="node-config-input-account"><i class="icon-user"></i> Account ID (SIA ID – volitelné)</label>
+        <input type="text" id="node-config-input-account" placeholder="000997">
     </div>
     <div class="form-row">
-        <label for="node-config-input-account"><i class="icon-user"></i> Číslo účtu (volitelné)</label>
-        <input type="text" id="node-config-input-account">
+        <label for="node-config-input-receiverID"><i class="icon-id-badge"></i> Receiver ID (volitelné)</label>
+        <input type="text" id="node-config-input-receiverID" placeholder="000997">
     </div>
     <div class="form-row">
         <label for="node-config-input-allowedEvents"><i class="icon-filter"></i> Povolené události (CSV)</label>
@@ -67,7 +71,7 @@
     </div>
     <div class="form-row">
         <label for="node-config-input-zoneMap"><i class="icon-map"></i> Mapování zón (JSON)</label>
-        <textarea id="node-config-input-zoneMap" style="width: 100%;" rows="3" placeholder='{"01":"Vchod","02":"Garáž"}'></textarea>
+        <textarea id="node-config-input-zoneMap" style="width: 100%;" rows="3" placeholder='{"01":"Vchod","02":"Garáž","03":"Kancelář"}'></textarea>
     </div>
     <div class="form-row">
         <label for="node-config-input-useAes"><i class="icon-lock-open"></i> Použít AES dešifrování</label>
@@ -97,14 +101,14 @@
         <input type="checkbox" id="node-config-input-autoRespondPolling">
     </div>
     <div class="form-row">
-        <label for="node-config-input-pollResponseTemplate"><i class="icon-pencil"></i> Šablona odpovědi (např. P#${zone})</label>
-        <input type="text" id="node-config-input-pollResponseTemplate" placeholder="P#${zone}">
+        <label for="node-config-input-pollResponseTemplate"><i class="icon-pencil"></i> Šablona odpovědi (např. P#${account})</label>
+        <input type="text" id="node-config-input-pollResponseTemplate" placeholder="P#${account}">
     </div>
 </script>
 
-<!-- ============================================ -->
-<!-- Hlavní node – editovací formulář             -->
-<!-- ============================================ -->
+<!-- ========================================= -->
+<!-- Hlavní node – editovací formulář           -->
+<!-- ========================================= -->
 <script type="text/x-red" data-template-name="sia-server">
     <div class="form-row">
         <label for="node-input-name"><i class="icon-tag"></i> Název uzlu</label>
@@ -124,48 +128,46 @@
     </div>
 </script>
 
-<!-- ============================================ -->
-<!-- Nápověda pro konfigurační node               -->
-<!-- ============================================ -->
+<!-- ========================================= -->
+<!-- Nápověda pro konfigurační node             -->
+<!-- ========================================= -->
 <script type="text/x-red" data-help-name="sia-server-config">
     <p>
-        <b>SIA Server Config</b> – sdílené nastavení:
+        <b>SIA Server Config</b> – sdílená konfigurace serveru:
         <ul>
-            <li><b>Port:</b> TCP port, na kterém naslouchá ústředna (výchozí 10002).</li>
-            <li><b>Heslo/PIN:</b> Volitelné, pokud ústředna vyžaduje ověření.</li>
-            <li><b>Číslo účtu:</b> Identifikace ústředny (např. „000997“).</li>
-            <li><b>Povolené události:</b> CSV (např. „BA,BF,GC“) – ostatní se ignorují.</li>
-            <li><b>Mapování zón:</b> JSON pro přeložení čísel zón (např. {"01":"Vchod"}).</li>
-            <li><b>Použít AES:</b> Zaškrtněte, pokud ústředna posílá šifrované zprávy.</li>
-            <li><b>AES klíč:</b> Hexadecimální řetězec 16 bajtů (32 znaků).</li>
-            <li><b>Interval obnovení:</b> Počet s, po kterých se zkusí znovu naslouchat po chybě.</li>
-            <li><b>Povolení uživatelé:</b> CSV kódů (např. „0001,0002“) – ARM/DISARM jen pro ně.</li>
-            <li><b>Jazyk:</b> Lokalizace „en“/„cs“.</li>
-            <li><b>Automatická odpověď na polling:</b> Pokud zaškrtnuto, při přijmu „F#…“ odpoví podle šablony.</li>
-            <li><b>Šablona odpovědi:</b> Např. <code>P#${zone}</code> – `${zone}` se nahradí skutečnou hodnotou z pollu.</li>
+          <li><b>Port:</b> TCP port, na kterém naslouchá ústředna (výchozí 10002).</li>
+          <li><b>Account ID:</b> (volitelné) SIA‐ID ústředny (např. „000997“). Pokud zde není, použije se automaticky prvních několik číslic z polling rámce.</li>
+          <li><b>Receiver ID:</b> (volitelné) ID, které posíláme jako druhý parametr v ACK. Pokud není zadáno, použije se stejné jako Account ID.</li>
+          <li><b>Povolené události:</b> CSV (např. „BA,BF,GC“) – ostatní se ignorují.</li>
+          <li><b>Mapování zón:</b> JSON objekt pro přeložení čísel zón (např. {"01":"Vchod","02":"Garáž"}).</li>
+          <li><b>Použít AES:</b> Zaškrtněte, pokud ústředna posílá šifrované zprávy (AES-128-CBC).</li>
+          <li><b>AES klíč:</b> Hexadecimální řetězec 16 bajtů (32 znaků), pokud je AES aktivní.</li>
+          <li><b>Interval obnovení:</b> Počet sekund, po kterých se pokusí server znovu naslouchat po chybě nebo odpojení.</li>
+          <li><b>Povolení uživatelé:</b> CSV kódů (např. „0001,0002“) – ARM/DISARM jen od těchto kódů.</li>
+          <li><b>Jazyk:</b> Lokalizace textových zpráv v UI (en/cs).</li>
+          <li><b>Automatická odpověď na polling:</b> Pokud zaškrtnuto, po přijetí „F#…“ server odešle ack podle šablony.</li>
+          <li><b>Šablona odpovědi:</b> Například <code>P#${account}</code>. Podporuje <code>${account}</code> (z polling) a <code>${zone}</code> (pokud polling obsahuje suffix).</li>
         </ul>
     </p>
 </script>
 
-<!-- ============================================ -->
-<!-- Nápověda pro hlavní node                     -->
-<!-- ============================================ -->
+<!-- ========================================= -->
+<!-- Nápověda pro hlavní node                   -->
+<!-- ========================================= -->
 <script type="text/x-red" data-help-name="sia-server">
     <p>
-        <b>SIA Server</b> – uzel naslouchá na vybraném portu a zpracovává:
-        <ul>
-            <li><b>SIA-DCS (DC-09)</b> – burzy安全 eventy.</li>
-            <li><b>ADM-CID (SIA-DC-05)</b> – Contact-ID s ověřením CRC-16.</li>
-            <li><b>Polling „F#…“</b> – keep-alive; odpovídá šablonou (např. <code>P#${zone}</code>).</li>
-            <li><b>AES-128-CBC</b> – dešifruje CASPO rámce.</li>
-            <li><b>Whitelist eventů</b> – jen povolené eventy.</li>
-            <li><b>Mapování zón</b> – číslům se nastavují jména.</li>
-            <li><b>Logování</b> – každá platná událost se ukládá do <code>/home/nodered/sia-events.log</code>.</li>
-            <li><b>Role-based ARM/DISARM</b> – jen uživatelé z CSV.</li>
-            <li><b>Retry / Reconnect</b> – po chybě se server znovu spustí.</li>
-            <li><b>Status v UI</b> – ukazuje připojení/chyby.</li>
-            <li><b>HTTP endpoint</b> – externí POST /sia-server/:id/event pro injektování eventů.</li>
-            <li><b>Lokalizace</b> – angličtina/čeština (v textu).</li>
-        </ul>
+      <b>SIA Server</b> – uzel naslouchá TCP portu a zpracovává:
+      <ul>
+        <li><b>Polling („F#…“ → „P#…“):</b> keep-alive, server automaticky odpoví podle šablony a ústředna začne posílat SIA-DCS eventy.</li>
+        <li><b>SIA-DCS (DC-09 Level 4):</b> podpora volitelného CRC-16, multi-fragmentace, diagnostické („DIAG“) zprávy, lokalizace, mapování zón.</li>
+        <li><b>Contact-ID (ADM-CID):</b> ověření CRC-16, payload „event=… zone=… user=…“ se parsuje a předává jako objekt.</li>
+        <li><b>AES-128-CBC:</b> dešifrování, pokud je aktivní (prefix „AES#“ + IV + ciphertext v hex).</li>
+        <li><b>Timeout po ACK:</b> pokud do 2 s nepřijde první SIA-DCS event, socket se uzavře a server se znovu pokusí naslouchat.</li>
+        <li><b>Keep-alive od serveru:</b> pokud 60 s nepřijde žádný paket, server pošle „F#<receiverID>“ pro udržení spojení.</li>
+        <li><b>Role-based ARM/DISARM:</b> pouze kódy z CSV ‚Povolení uživatelé‘ mají právo posílat ARM/DISARM COMMAND.</li>
+        <li><b>Status v UI:</b> zelená = naslouchá, červená = odpojeno, žlutá = chybný formát (CRC, neznámý).</li>
+        <li><b>HTTP endpoint:</b> POST /sia-server/:id/event → externí injektování eventů.</li>
+        <li><b>Logování:</b> všechny validní události se ukládají do „/home/nodered/sia-events.log“.</li>
+      </ul>
     </p>
 </script>
