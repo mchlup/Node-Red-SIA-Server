@@ -3,17 +3,19 @@
     RED.nodes.registerType('sia-server-config', {
         category: 'config',
         defaults: {
-            name:             { value: "" },
-            port:             { value: 10000, required: true },
-            password:         { value: "",      required: false },
-            account:          { value: "",      required: false },
-            allowedEvents:    { value: "",      required: false },
-            zoneMap:          { value: "",      required: false },
-            useAes:           { value: false,   required: false },
-            aesKey:           { value: "",      required: false },
-            reconnectInterval:{ value: 10,      required: false },
-            allowedUsers:     { value: "",      required: false },
-            language:         { value: "en",    required: false }
+            name:              { value: "" },
+            port:              { value: 10000, required: true },
+            password:          { value: "",      required: false },
+            account:           { value: "000997",      required: false },
+            allowedEvents:     { value: "",      required: false },
+            zoneMap:           { value: "",      required: false },
+            useAes:            { value: false,   required: false },
+            aesKey:            { value: "",      required: false },
+            reconnectInterval: { value: 10,      required: false },
+            allowedUsers:      { value: "",      required: false },
+            language:          { value: "en",    required: false },
+            autoRespondPolling:{ value: false,   required: false },
+            pollResponseTemplate: { value: "P#${zone}", required: false }
         },
         label: function() {
             return this.name || ("SIA Config " + this.port);
@@ -27,8 +29,8 @@
         defaults: {
             name:      { value: "" },
             config:    { type: "sia-server-config", required: true },
-            debugMode: { value: true, required: false },
-            rawOutput: { value: true, required: false }
+            debugMode: { value: false, required: false },
+            rawOutput: { value: false, required: false }
         },
         inputs:  1,
         outputs: 2,
@@ -60,7 +62,7 @@
         <input type="text" id="node-config-input-account">
     </div>
     <div class="form-row">
-        <label for="node-config-input-allowedEvents"><i class="icon-filter"></i> Povolené události (CSV klíče)</label>
+        <label for="node-config-input-allowedEvents"><i class="icon-filter"></i> Povolené události (CSV)</label>
         <input type="text" id="node-config-input-allowedEvents" placeholder="BA,BF,GC,GP">
     </div>
     <div class="form-row">
@@ -89,6 +91,14 @@
             <option value="en">English</option>
             <option value="cs">Čeština</option>
         </select>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-autoRespondPolling"><i class="icon-repeat"></i> Automatická odpověď na polling</label>
+        <input type="checkbox" id="node-config-input-autoRespondPolling">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-pollResponseTemplate"><i class="icon-pencil"></i> Šablona odpovědi (např. P#${zone})</label>
+        <input type="text" id="node-config-input-pollResponseTemplate" placeholder="P#${zone}">
     </div>
 </script>
 
@@ -119,18 +129,20 @@
 <!-- ============================================ -->
 <script type="text/x-red" data-help-name="sia-server-config">
     <p>
-        <b>SIA Server Config</b> – sdílená konfigurace, která určuje:
+        <b>SIA Server Config</b> – sdílené nastavení:
         <ul>
-            <li><b>Port</b>: TCP port, na kterém naslouchá ústředna (výchozí 10002)</li>
-            <li><b>Heslo/PIN</b>: Volitelné ověření přístupu (pokud ústředna vyžaduje)</li>
-            <li><b>Číslo účtu</b>: Identifikace ústředny (např. "123456")</li>
-            <li><b>Povolené události</b>: CSV klíče eventů (např. "BA,BF,GC"), pokud se mají ignorovat ostatní</li>
-            <li><b>Mapování zón</b>: JSON objekt pro pojmenování zón (např. {"01":"Vchod","02":"Garáž"})</li>
-            <li><b>Použít AES</b>: Zaškrtněte, pokud je ústředna nakonfigurována na AES šifrování</li>
-            <li><b>AES klíč</b>: Hexadecimální klíč 16 bajtů (32 znaků), pokud je AES aktivní</li>
-            <li><b>Interval obnovení</b>: Počet sekund, po kterých se node pokusí znovu naslouchat, pokud se server uzavře</li>
-            <li><b>Povolení uživatelé</b>: CSV uživatelských kódů, kteří smí posílat ARM/DISARM</li>
-            <li><b>Jazyk</b>: "en" pro angličtinu (výchozí), "cs" pro češtinu (překlady)</li>
+            <li><b>Port:</b> TCP port, na kterém naslouchá ústředna (výchozí 10002).</li>
+            <li><b>Heslo/PIN:</b> Volitelné, pokud ústředna vyžaduje ověření.</li>
+            <li><b>Číslo účtu:</b> Identifikace ústředny (např. „000997“).</li>
+            <li><b>Povolené události:</b> CSV (např. „BA,BF,GC“) – ostatní se ignorují.</li>
+            <li><b>Mapování zón:</b> JSON pro přeložení čísel zón (např. {"01":"Vchod"}).</li>
+            <li><b>Použít AES:</b> Zaškrtněte, pokud ústředna posílá šifrované zprávy.</li>
+            <li><b>AES klíč:</b> Hexadecimální řetězec 16 bajtů (32 znaků).</li>
+            <li><b>Interval obnovení:</b> Počet s, po kterých se zkusí znovu naslouchat po chybě.</li>
+            <li><b>Povolení uživatelé:</b> CSV kódů (např. „0001,0002“) – ARM/DISARM jen pro ně.</li>
+            <li><b>Jazyk:</b> Lokalizace „en“/„cs“.</li>
+            <li><b>Automatická odpověď na polling:</b> Pokud zaškrtnuto, při přijmu „F#…“ odpoví podle šablony.</li>
+            <li><b>Šablona odpovědi:</b> Např. <code>P#${zone}</code> – `${zone}` se nahradí skutečnou hodnotou z pollu.</li>
         </ul>
     </p>
 </script>
@@ -140,19 +152,20 @@
 <!-- ============================================ -->
 <script type="text/x-red" data-help-name="sia-server">
     <p>
-        <b>SIA Server</b> – uzel naslouchá na portu zvoleném v konfiguraci. Vytváří TCP server a zpracovává:
+        <b>SIA Server</b> – uzel naslouchá na vybraném portu a zpracovává:
         <ul>
-            <li><b>SIA-DCS (DC-09)</b> – běžné bezpečnostní eventy</li>
-            <li><b>ADM-CID (SIA-DC-05)</b> – Contact-ID s CRC-16 ověřením</li>
-            <li><b>Polling rámce "F#"</b> – keep-alive, neodesílá ACK</li>
-            <li><b>AES šifrování</b> – dešifruje rámce, pokud je aktivní</li>
-            <li><b>Filtrace eventů</b> – pouze povolené klíče uskuteční akci</li>
-            <li><b>Mapování zón</b> – čísla zón lze přeložit na texty</li>
-            <li><b>Logování do souboru</b> – každá událost se ukládá do si­a-events.log</li>
-            <li><b>Role-based příkazy</b> – povolení ARM/DISARM jen pro vybrané uživatele</li>
-            <li><b>Status v UI</b> – zobrazuje stav připojení a chyby přímo v editoru</li>
-            <li><b>HTTP endpoint</b> – možnost externě posílat eventy přes REST</li>
-            <li><b>Lokalizace</b> – angličtina / čeština</li>
+            <li><b>SIA-DCS (DC-09)</b> – burzy安全 eventy.</li>
+            <li><b>ADM-CID (SIA-DC-05)</b> – Contact-ID s ověřením CRC-16.</li>
+            <li><b>Polling „F#…“</b> – keep-alive; odpovídá šablonou (např. <code>P#${zone}</code>).</li>
+            <li><b>AES-128-CBC</b> – dešifruje CASPO rámce.</li>
+            <li><b>Whitelist eventů</b> – jen povolené eventy.</li>
+            <li><b>Mapování zón</b> – číslům se nastavují jména.</li>
+            <li><b>Logování</b> – každá platná událost se ukládá do <code>/home/nodered/sia-events.log</code>.</li>
+            <li><b>Role-based ARM/DISARM</b> – jen uživatelé z CSV.</li>
+            <li><b>Retry / Reconnect</b> – po chybě se server znovu spustí.</li>
+            <li><b>Status v UI</b> – ukazuje připojení/chyby.</li>
+            <li><b>HTTP endpoint</b> – externí POST /sia-server/:id/event pro injektování eventů.</li>
+            <li><b>Lokalizace</b> – angličtina/čeština (v textu).</li>
         </ul>
     </p>
 </script>
