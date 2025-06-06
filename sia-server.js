@@ -5,15 +5,15 @@ const crypto = require("crypto");
 
 module.exports = function (RED) {
 
-    // ================================
+    // =========================================
     // Konfigurační node
-    // ================================
+    // =========================================
     function SiaServerConfigNode(n) {
         RED.nodes.createNode(this, n);
         this.name = n.name;
         this.port = parseInt(n.port) || 10000;
-        this.password = n.password || "";
         this.account = n.account || "";
+        this.receiverID = n.receiverID || this.account || "";
         this.allowedEvents = (n.allowedEvents || "").split(",").map(s => s.trim()).filter(s => s);
         try {
             this.zoneMap = n.zoneMap ? JSON.parse(n.zoneMap) : {};
@@ -25,18 +25,18 @@ module.exports = function (RED) {
         this.reconnectInterval = parseInt(n.reconnectInterval) || 10;
         this.allowedUsers = (n.allowedUsers || "").split(",").map(s => s.trim()).filter(s => s);
         this.language = n.language || "en";
-        this.autoRespondPolling = n.autoRespondPolling || true;
-        // Výchozí šablona: odpověď na polling musí být "P#<account>"
+        this.autoRespondPolling = n.autoRespondPolling || false;
         this.pollResponseTemplate = n.pollResponseTemplate || "P#${account}";
     }
     RED.nodes.registerType("sia-server-config", SiaServerConfigNode);
 
-    // ================================
+    // =========================================
     // Hlavní node
-    // ================================
+    // =========================================
     function SiaServerNode(config) {
         RED.nodes.createNode(this, config);
 
+        // Získání konfiguračního node
         const nodeConfig = RED.nodes.getNode(config.config);
         if (!nodeConfig) {
             this.error("Není přiřazen žádný konfigurační node!");
@@ -46,6 +46,7 @@ module.exports = function (RED) {
         const node = this;
         const port = nodeConfig.port;
         const defaultAccount = nodeConfig.account;
+        const receiverID = nodeConfig.receiverID;
         const allowedEvents = nodeConfig.allowedEvents;
         const zoneMap = nodeConfig.zoneMap;
         const useAes = nodeConfig.useAes;
@@ -60,8 +61,10 @@ module.exports = function (RED) {
 
         let clientSockets = [];
         let server = null;
+        let pendingFragment = null;   // pro multi-fragmentace SIA-DCS
+        let keepAliveInterval = null; // pro posílání „F#<receiverID>“ od serveru
 
-        // Lokalizační zprávy (CS/EN)
+        // Lokalizační zprávy
         const messages = {
             en: {
                 BA: "Burglary Alarm",
@@ -70,26 +73,30 @@ module.exports = function (RED) {
                 GP: "Armed Present",
                 BD: "Bypass Disable",
                 PD: "Power Failure",
+                DIAG: "Diagnostic",
                 POLL: "Polling Frame",
                 UNAUTHORIZED: "Unauthorized user",
-                NO_CONNECTION: "No connection to panel"
+                NO_CONNECTION: "No connection to panel",
+                SIA_CRC_ERR: "SIA-DCS CRC mismatch"
             },
             cs: {
                 BA: "Poplach vloupání",
                 BF: "Požární poplach",
                 GC: "Připnuto z domova",
                 GP: "Připnuto v objektu",
-                BD: "Bypass vypnutý",
+                BD: "Vypnutí bypass",
                 PD: "Výpadek napájení",
+                DIAG: "Diagnostika",
                 POLL: "Pollingový rámec",
                 UNAUTHORIZED: "Nepovolený uživatel",
-                NO_CONNECTION: "Není připojena ústředna"
+                NO_CONNECTION: "Není připojena ústředna",
+                SIA_CRC_ERR: "Chyba CRC u SIA-DCS"
             }
         };
 
-        // ================================
+        // =========================================
         // Spuštění TCP serveru
-        // ================================
+        // =========================================
         function startServer() {
             server = net.createServer((socket) => {
                 clientSockets.push(socket);
@@ -97,24 +104,58 @@ module.exports = function (RED) {
                 node.log(`Klient připojen: ${socket.remoteAddress}:${socket.remotePort}`);
                 node.status({ fill: "green", shape: "dot", text: `Připojeno od ${socket.remoteAddress}` });
 
+                // Restart keep-alive timer
+                if (keepAliveInterval) {
+                    clearInterval(keepAliveInterval);
+                }
+                keepAliveInterval = setInterval(() => {
+                    // Pokud za posledních 60 s nedorazil žádný paket, server pošle F#<receiverID>
+                    let now = Date.now();
+                    // Pro jednoduchost: posílat každých 60 s, pokud socket stále otevřen
+                    if (clientSockets.includes(socket)) {
+                        let keepMsg = `F#${receiverID || defaultAccount}\r\n`;
+                        socket.write(keepMsg);
+                        node.log(`Odesílám server-polling: ${keepMsg.trim()}`);
+                    }
+                }, 60000);
+
                 socket.on("data", (data) => {
                     let frames = data.split("\r\n").filter(x => x.trim().length > 0);
                     for (let frame of frames) {
                         node.log(`Přijato (raw): ${frame}`);
+                        // Zpracování multi-fragmentace SIA-DCS
+                        if (pendingFragment) {
+                            // Pokud předchozí fragment končil tečkami, spustíme spojování
+                            pendingFragment += frame;
+                            if (!pendingFragment.endsWith("...")) {
+                                // Nyní máme kompletní payload, pokračujeme s raw = pendingFragment
+                                frame = pendingFragment;
+                                pendingFragment = null;
+                            } else {
+                                // Stále pokračujeme druhým fragmentem ⇒ čekáme další
+                                continue;
+                            }
+                        }
+                        // Pokud je tento frame SIA-DCS a končí „...“, vrátíme se na další část
+                        if (frame.startsWith("SIA-DCS") && frame.trim().endsWith("...")) {
+                            pendingFragment = frame;
+                            continue;
+                        }
+
+                        // Základní parse
                         let sia = tryParseSia(frame, defaultAccount);
                         if (sia.valid) {
-                            // === Polling („F#…“) ===
+                            // --- Polling („F#…“) ---
                             if (sia.protocol === "GATEWAY-POLL") {
                                 sia.localizedMessage = localize("POLL", sia.account);
-
                                 // Odeslat polling-ack („P#<account>“) pokud je autoRespondPolling
                                 if (autoRespondPolling) {
-                                    let resp = pollResponseTemplate.replace("${account}", sia.account);
+                                    let resp = pollResponseTemplate
+                                              .replace("${account}", sia.account || defaultAccount)
+                                              .replace("${zone}", sia.zone || "");
                                     socket.write(resp + "\r\n");
                                     node.log(`Odesílám polling ack: ${resp}`);
                                 }
-
-                                // Pošle do prvního výstupu objekt s polling daty
                                 node.send([{
                                     payload: sia,
                                     raw: frame,
@@ -124,21 +165,24 @@ module.exports = function (RED) {
                                 continue;
                             }
 
-                            // === Standardní SIA-DCS (DC-09) ===
+                            // --- SIA-DCS (DC-09 Level 4) ---
                             if (sia.protocol === "SIA-DCS") {
-                                // Filtrace povolených eventů (pokud je vyplněno)
+                                // Pokud existuje CRC chyba, tryParseSia vrátil valid = false
+                                // Filtrace povolených eventů
                                 if (allowedEvents.length && !allowedEvents.includes(sia.event)) {
                                     node.log(`Ignoruji událost ${sia.event}`);
                                     continue;
                                 }
-                                // Odeslat ACK
-                                let ack = buildAck(sia.sequence, sia.account);
+                                // Odeslat ACK s optional Receiver ID
+                                let ack = buildAck(sia.sequence, sia.account, receiverID || defaultAccount);
                                 node.log(`Odesílám ACK: ${ack.trim()}`);
                                 socket.write(ack);
                             }
-                            // === Contact-ID (ADM-CID) – neodesíláme ACK, pouze zpracujeme ===
 
-                            // Mapování zóny (pokud existuje)
+                            // --- Contact-ID (ADM-CID) ---
+                            // Pro ADM-CID neodesíláme ACK, protože CRC se ověřilo v parseru
+
+                            // Mapování zón (pokud existuje)
                             if (sia.zone && zoneMap[sia.zone]) {
                                 sia.zoneName = zoneMap[sia.zone];
                             }
@@ -146,7 +190,7 @@ module.exports = function (RED) {
                             sia.localizedMessage = localize(sia.event, sia.zone);
                             // Logování do souboru
                             logEvent(sia);
-                            // Pošleme do prvního výstupu
+                            // Poslat do prvního výstupu
                             node.send([{
                                 payload: sia,
                                 raw: frame,
@@ -155,10 +199,10 @@ module.exports = function (RED) {
                             }, null]);
 
                         } else {
-                            // === Špatný formát / CRC / neznámý formát ===
+                            // --- Chybný formát / CRC / neznámý formát ---
                             node.warn(`Chyba parsování: ${sia.error}`);
-                            if (sia.protocol === "SIA-DCS") {
-                                let nak = buildNak(sia.sequence);
+                            if (sia.protocol === "SIA-DCS" && sia.error === "SIA-DCS CRC mismatch") {
+                                let nak = buildNak(sia.sequence, receiverID || defaultAccount);
                                 node.log(`Odesílám NAK: ${nak.trim()}`);
                                 socket.write(nak);
                             }
@@ -184,6 +228,10 @@ module.exports = function (RED) {
                         timestamp: new Date().toISOString()
                     }]);
                     node.status({ fill: "red", shape: "ring", text: "Odpojeno" });
+                    if (keepAliveInterval) {
+                        clearInterval(keepAliveInterval);
+                        keepAliveInterval = null;
+                    }
                 });
 
                 socket.on("error", (err) => {
@@ -195,7 +243,11 @@ module.exports = function (RED) {
                     node.status({ fill: "red", shape: "ring", text: "Chyba socketu" });
                     clientSockets = clientSockets.filter(s => s !== socket);
                     socket.destroy();
-                    // Po reconnectInterval sekundách restartujeme server
+                    if (keepAliveInterval) {
+                        clearInterval(keepAliveInterval);
+                        keepAliveInterval = null;
+                    }
+                    // Po reconnectInterval sekundách restartuje server
                     setTimeout(() => {
                         try {
                             startServer();
@@ -226,20 +278,22 @@ module.exports = function (RED) {
 
         startServer();
 
-        // ================================
-        // Při vypnutí node
-        // ================================
+        // =========================================
+        // Uzavření node – zavří server a sockety
+        // =========================================
         this.on("close", () => {
             if (server) server.close();
             clientSockets.forEach(s => s.destroy());
             clientSockets = [];
+            if (keepAliveInterval) clearInterval(keepAliveInterval);
+            pendingFragment = null;
             node.status({});
             node.log("SIA server ukončen");
         });
 
-        // ================================
-        // Zpracování vstupu (ARM / DISARM / CUSTOM)
-        // ================================
+        // =========================================
+        // Handling vstupních zpráv (ARM/DISARM/CUSTOM)
+        // =========================================
         node.on("input", (msg) => {
             try {
                 if (!msg.payload || typeof msg.payload !== "object") {
@@ -290,9 +344,9 @@ module.exports = function (RED) {
             }
         });
 
-        // ================================
-        // Parser (SIA-DCS, ADM-CID, polling, AES)
-        // ================================
+        // =========================================
+        // Parser (SIA-DCS, ADM-CID, polling, AES, fragmentace)
+        // =========================================
         function tryParseSia(frame, defaultAcct) {
             let result = {
                 valid: false,
@@ -304,23 +358,39 @@ module.exports = function (RED) {
                 zone: null,
                 user: null,
                 partition: null,
+                suffix: null,
                 message: null
             };
 
             let raw = frame.trim();
             try {
-                // --- 1) AES dešifrování, pokud je aktivní ---
+                // --- AES dešifrování, pokud je aktivní ---
                 if (useAes && raw.startsWith("AES#")) {
                     raw = decryptAesFrame(raw, aesKey);
                 }
 
-                // --- 2) SIA-DCS (DC-09) ---
-                let siaRe = /^(SIA-DCS)\s+[0-9A-Fa-f]+\s*(\d+)?\s*"(.*)"$/;
+                // --- 1) SIA-DCS (DC-09) s volitelným CRC-16 ---
+                let siaRe = /^SIA-DCS\s+[0-9A-Fa-f]+\s*(\d+)?\s*"(.*)"\s*([0-9A-Fa-f]{4})?$/;
                 let m = siaRe.exec(raw);
                 if (m) {
                     result.protocol = "SIA-DCS";
-                    result.sequence = m[2] || null;
-                    let payload = m[3];
+                    result.sequence = m[1] || null;
+                    let payload = m[2];
+                    let receivedCrc = m[3]; // může být undefined
+
+                    // Ověření CRC, pokud přítomno
+                    if (receivedCrc) {
+                        // Vypočítáme CRC z části raw bez posledního CRC
+                        let withoutCrc = raw.substring(0, raw.lastIndexOf(`"${payload}"`) + payload.length + 2);
+                        let calcCrc = crc.crc16xmodem(Buffer.from(withoutCrc, "ascii"))
+                                      .toString(16).toUpperCase().padStart(4, "0");
+                        if (calcCrc !== receivedCrc.toUpperCase()) {
+                            result.error = localize("SIA_CRC_ERR", "");
+                            return result;
+                        }
+                    }
+
+                    // Parsování payloadu: [EVENT|ZONE:PART]Message
                     let evtRe = /^\[([A-Z0-9]+)\|([A-Z0-9]+)(?::([0-9]+))?\](.*)$/;
                     let em = evtRe.exec(payload);
                     if (!em) {
@@ -335,7 +405,7 @@ module.exports = function (RED) {
                     return result;
                 }
 
-                // --- 3) ADM-CID (SIA-DC-05) s CRC-16 ---
+                // --- 2) ADM-CID (Contact-ID) s CRC-16 ---
                 let admRe = /^ADM-CID\s+([\d]+)\s+([\d]+)\s*\[(.*)\]([0-9A-Fa-f]{4})$/;
                 let n = admRe.exec(raw);
                 if (n) {
@@ -343,6 +413,7 @@ module.exports = function (RED) {
                     result.sequence = n[2];
                     let payload = n[3];
                     let receivedCrc = n[4];
+                    // Ověření CRC-16
                     let dataForCrc = raw.substring(0, raw.lastIndexOf("]") + 1);
                     let actualCrc = crc.crc16xmodem(Buffer.from(dataForCrc, "ascii"))
                                       .toString(16).toUpperCase().padStart(4, "0");
@@ -355,29 +426,54 @@ module.exports = function (RED) {
                     return result;
                 }
 
-                // --- 4) Pollingový rámec "F#<Account>" ---
+                // --- 3) Pollingový rámec „F#<Account><Suffix?>“ ---
                 if (raw.startsWith("F#")) {
                     result.protocol = "GATEWAY-POLL";
-                    let acctVal = raw.slice(2).trim();
-                    let acctMatch = acctVal.match(/^\d+/);
-                    result.account = acctMatch ? acctMatch[0] : acctVal;
+                    let payload = raw.slice(2).trim();
+                    // Rozdělíme na číslice (account) a vše ostatní (suffix)
+                    let parts = payload.match(/^(\d+)(.*)$/);
+                    if (parts) {
+                        result.account = parts[1];
+                        result.suffix = parts[2] || "";
+                    } else {
+                        result.account = payload;
+                        result.suffix = "";
+                    }
                     result.event = "POLL";
                     result.zone = null;
                     result.message = "Polling / keep-alive frame";
                     result.valid = true;
                     return result;
                 }
+
+                // --- 4) Diagnostický „DIAG“ (pokud to ústředna posílá) ---
+                let diagRe = /^\[DIAG\|(.*)\](.*)$/;
+                let d = diagRe.exec(raw);
+                if (d) {
+                    result.protocol = "SIA-DCS";
+                    result.event = "DIAG";
+                    result.zone = null;
+                    result.partition = null;
+                    result.message = d[2]; // diagnostické info
+                    result.valid = true;
+                    return result;
+                }
+
                 // --- 5) Neznámý formát ---
                 result.error = "Unrecognized format";
                 return result;
+
             } catch (e) {
                 result.error = "Parse exception: " + e.message;
                 return result;
             }
         }
 
-        // --- AES-128-CBC dešifrování (iv + ciphertext v hexu) ---
+        // =========================================
+        // Dešifrování AES-128-CBC (hex: IV + ciphertext)
+        // =========================================
         function decryptAesFrame(frame, keyHex) {
+            // Formát: "AES#"<IV(32 hex)><CIPHERTEXT(hex)>
             let hexData = frame.slice(4).trim();
             let iv = Buffer.from(hexData.slice(0, 32), "hex");
             let ct = Buffer.from(hexData.slice(32), "hex");
@@ -387,22 +483,35 @@ module.exports = function (RED) {
             return decrypted.toString("ascii");
         }
 
-        // --- Parsování Contact-ID payload (event, zone, uživatel, …) ---
+        // =========================================
+        // Parsování Contact-ID payload
+        // formát: event=XXXX zone=YYYY user=ZZZZ code=WWWW
+        // =========================================
         function parseContactIdPayload(text, result) {
             let parts = text.split(/\s+/);
             parts.forEach(p => {
                 let [k, v] = p.split("=");
                 switch (k) {
-                    case "event": result.event = v; break;
-                    case "zone":  result.zone = v; break;
-                    case "user":  result.user = v; break;
-                    case "code":  result.user = v; break;
+                    case "event":
+                        result.event = v;
+                        break;
+                    case "zone":
+                        result.zone = v;
+                        break;
+                    case "user":
+                        result.user = v;
+                        break;
+                    case "code":
+                        result.user = v;
+                        break;
                 }
             });
-            result.message = `Event ${result.event}, zóna ${result.zone}`;
+            result.message = `Event ${result.event}, zone ${result.zone}`;
         }
 
-        // --- Lokalizace zpráv (CS/EN) ---
+        // =========================================
+        // Lokalizace zpráv
+        // =========================================
         function localize(eventCode, zone) {
             let msgSet = messages[language] || messages["en"];
             let base = msgSet[eventCode] || eventCode;
@@ -412,23 +521,36 @@ module.exports = function (RED) {
             return base;
         }
 
-        // --- Logování událostí do souboru ---
+        // =========================================
+        // Logování do souboru
+        // =========================================
         function logEvent(sia) {
-            let logline = `${new Date().toISOString()},${sia.account},${sia.event},${sia.zone},${sia.message}\n`;
+            let logline = `${new Date().toISOString()},${sia.account},${sia.event},${sia.zone || ""},${sia.message}\n`;
             fs.appendFile("/home/nodered/sia-events.log", logline, err => {
                 if (err) node.error("Chyba při zapisování logu: " + err);
             });
         }
 
-        // --- Funkce: ACK / NAK ---
-        function buildAck(seq, acct) {
+        // =========================================
+        // Build ACK / NAK
+        // =========================================
+        function buildAck(seq, acct, recvID) {
+            // pokud je Receiver ID, použijeme "ACK <seq> <recvID>"
+            if (recvID) {
+                return `\r\nACK ${seq || ""} ${recvID}\r\n`;
+            }
             return `\r\nACK ${seq || ""}\r\n`;
         }
-        function buildNak(seq) {
+        function buildNak(seq, recvID) {
+            if (recvID) {
+                return `\r\nNAK ${seq || ""} ${recvID}\r\n`;
+            }
             return `\r\nNAK ${seq || ""}\r\n`;
         }
 
-        // --- HTTP endpoint pro externí eventy (volitelné) ---
+        // =========================================
+        // HTTP endpoint pro externí eventy
+        // =========================================
         RED.httpAdmin.post("/sia-server/:id/event", RED.auth.needsPermission("sia-server.write"), function(req, res) {
             let node = RED.nodes.getNode(req.params.id);
             if (node) {
