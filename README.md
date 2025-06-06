@@ -1,72 +1,81 @@
 # node-red-contrib-sia-server
 
-**Verze 1.0.8** – plná podpora Honeywell Galaxy Dimension GD520 (SIA Level 4)
+**Verze 1.0.9** – plná podpora Honeywell Galaxy Dimension GD520 a obecně SIA Level 4
 
 ## Klíčové vlastnosti
-- **Polling (F# → P#)**  
-  - Ústředna GD posílá `F#<Account><Suffix?>`, server rozpozná account a suffix.  
-  - Server odpoví `P#<Account>\r\n` (nebo podle vlastní šablony), čímž ústředna uvolní tok SIA-DCS eventů.  
-  - Timeout 2 s: pokud po `P#…` nepřijde validní SIA-DCS, socket se uzavře, ústředna pošle znovu `F#…`.
-  - Keep-alive od serveru: každých 60 s, pokud od ústředny nic nepřišlo, server sám pošle `F#<ReceiverID>\r\n`.
 
-- **SIA-DCS (DC-09 Level 4)**
-  - Parsování `[EVENT|ZONE:PART]Message`.
-  - Volitelný CRC-16 (pokud přítomno na konci rámce), verifikace.  
-  - Multi-fragmentace: pokud rámec končí `...`, parser čeká na další část, dokud není celý payload.  
-  - Podpora diagnostických (`DIAG`) zpráv.
+1. **Polling (F# → P#)**
+   - GD Dimension posílá pollingový rámec `F#<Account><Suffix?>`.  
+   - Server rozpozná `Account` a `Suffix` (pokud existuje).  
+   - Pokud je `autoRespondPolling` zapnuto, odesílá se `P#<Account>\r\n` (nebo podle `pollResponseTemplate`).  
+   - Po odeslání polling-ACK se spustí timeout `ackTimeoutMs` (výchozí 2000 ms). Pokud do tohoto času nepřijde validní SIA-DCS, socket se uzavře a ústředna znovu pošle `F#…`.  
+   - Server také každých `keepAliveIntervalMs` ms (výchozí 60000 ms) posílá `F#<ReceiverID>\r\n`, pokud od ústředny v tomto intervalu nedorazil žádný paket, aby se zachovalo spojení živé (keep-alive).
 
-- **Contact-ID (ADM-CID)**
-  - Payload `event=…, zone=…, user=…, code=…` s ověřením CRC-16 (4 hex znaky).  
-  - Parsování klíč=hodnota.
+2. **SIA-DCS (DC-09 Level 4)**
+   - Parsování payloadu ve tvaru `[EVENT|ZONE:PART]Message`.  
+   - Podpora volitelného **CRC-16** (XModem nebo X.25) na celý rámec. Pokud je CRC chybný, vrátí se `NAK <seq> <ReceiverID>`.  
+   - Podpora **multi-fragmentace** dlouhých payloadů: pokud zpráva končí „…“, uloží se do `pendingFragment` a čeká se na další část, až do úplného payloadu.  
+   - Podpora **extensions**: pokud za hlavním payloadem (po `]`) následují samostatné částí oddělené `|`, např. `EXTENSION=BatteryLow|TIMESTAMP=20250607T134500`, uloží se do objektu `sia.extensions`.  
+   - Podpora **diagnostických paketů** (`[DIAG|…]…`).  
+   - Po úspěšném parsování (včetně verifikace CRC, pokud existuje) se odesílá `ACK <seq> <ReceiverID>\r\n` a event se předává do prvního výstupu (`msg.payload`).
 
-- **AES-128-CBC**
-  - Pokud je aktivní, server dešifruje rámec typu `AES#<IV(32hex)><CIPHERTEXT(hex)>`.  
-  - Po dešifrování se výsledek parsuje jako běžný SIA-DCS.
+3. **Contact-ID (ADM-CID)**
+   - Parsování toho, co přijde jako `ADM-CID <header> [payload]CRC`.  
+   - Ověření CRC-16 (XModem).  
+   - Payload typu `event=… zone=… user=… code=…` se rozparsuje do objektu.  
+   - Po úspěšné verifikaci se event pošle do prvního výstupu. U Contact-ID se neodesílá ACK (Contact-ID používá vlastní protokol).
 
-- **Receiver ID vs Account**
-  - `Account ID` (SIA-ID) se bere buď z nastavení, nebo z polling‐rámce.  
-  - `Receiver ID` lze zadat zvlášť – pokud existuje, zařadí se do ACK “ACK <seq> <ReceiverID>”.
+4. **AES-128-CBC**
+   - Pokud je v konfiguračním nodu `useAes = true`, servery očekávají, že přijaté rámce začínají prefixem `AES#` následovaným 32 hex znaky IV a poté ciphertextem (hex).  
+   - Node dešifruje pomocí AES-128-CBC a klíče (`aesKey`), vrátí čistý ASCII řetězec, který se pak parsuje standardním způsobem.
 
-- **Role-based ARM/DISARM**
-  - Všechny příkazy `payload.action = "ARM"` nebo `"DISARM"` kontrolují, zda `payload.code` je v seznamu `allowedUsers`.  
-  - Pokud není, server vrací chybu a neodesílá nic.
+5. **Receiver ID vs Account ID**
+   - `Account ID` je identifikátor ústředny (např. „000997“). Zejména se používá v polling-rámcích.  
+   - `Receiver ID` slouží jako druhý parametr v ACK/NAK (`ACK <seq> <ReceiverID>`). Pokud není explicitně zadán, použije se `Account ID`. V praxi se často přidává do ACK, aby ústředna potvrdila, že server je ten správný.
 
-- **Filtrace eventů (Whitelist)**
-  - V nastavení lze zadat pouze některé event kódy (např. `BA,BF,GC,GP`).  
-  - Ostatní eventy se ignorují.
+6. **Role-based ARM/DISARM**
+   - Ve vstupních zprávách (do druhého vstupu uzlu) je možné poslat JSON ve tvaru:
+     ```json
+     {
+       "action": "ARM",       // nebo "DISARM"
+       "account": "000997",   // volitelné, default = Account ID
+       "partition": "01",
+       "code": "0001"         // PIN kód uživatele
+     }
+     ```
+   - Server ověří, že pokud jsou `allowedUsers` (CSV) vyplněni, zadaný `code` je v tomto seznamu. Jinak vrátí chybu a příkaz neprojde.  
+   - Pokud je ověření úspěšné, vygeneruje se SIA-DCS rámec `SIA-DCS 00 "[AR|partition]code"\r\n` (pro ARM) nebo `[DA|partition]code` (pro DISARM) a pošle se do ústředny.
 
-- **Mapování zón**
-  - V JSONu lze definovat mapování `{"01":"Vchod","02":"Garáž","03":"Kancelář"}`.  
-  - Pokud přijde event pro zónu „02“, do výstupu se přidá `zoneName: "Garáž"`.
+7. **Filtrace a mapování**
+   - `allowedEvents` (CSV) určuje, které eventy se mají přijímat; ostatní se ignorují.  
+   - `zoneMap` (JSON) přeloží číselnou zónu na textový popisek (např. `"01":"Vchod"`). V `msg.payload` se pak objeví `zoneName`.
 
-- **Lokalizace (en/cs)**
-  - Podpora angličtiny a češtiny pro systémové zprávy („Polling Frame“, „Burglary Alarm“, „Unauthorized user“ apod.).
+8. **Logování do souboru**
+   - Každý případ validní události (SIA-DCS, Contact-ID, DIAG, iBD event) se dopíše do souboru `/home/nodered/sia-events.log` ve formátu:
+     ```
+     2025-06-07T12:34:56.789Z,000997,BA,01,Poplach vloupání v zóně 01,{"EXTENSION":"BatteryLow","TIMESTAMP":"20250607T134500"}
+     ```
+   - Pokud neexistují `extensions`, pole bude prázdné.
 
-- **Logování do souboru**
-  - Každá platná událost se přidá do `/home/nodered/sia-events.log` ve formátu:
-    ```
-    2025-06-07T12:34:56.789Z,000997,BA,01,Poplach vloupání v zóně 01
-    ```
+9. **Status v UI**
+   - Zelená tečka = server naslouchá.  
+   - Červený kroužek = odpojeno nebo neuspešné otevření portu.  
+   - Žlutý kroužek = chybné parsování / CRC.
 
-- **Status v UI**
-  - Zelená tečka = naslouchá správně.  
-  - Červený kroužek = odpojeno.  
-  - Žlutý kroužek = chybné parsování (CRC, formát).
+10. **Push-Webhook (volitelné)**
+    - Pokud je v konfiguraci zadáno `pushWebhookUrl` (např. `https://example.com/webhook`), po každém validním eventu (SIA-DCS, Contact-ID, DIAG) se pošle JSON metadat na danou URL metodou HTTP POST.  
+    - JSON obsahuje: `{ protocol, account, event, zone, message, timestamp, extensions, isDiagnostic }`.
 
-- **HTTP endpoint**
-  - `POST /sia-server/:id/event` (vyžaduje právo `sia-server.write`)  
-    - Tělo JSON:  
-      ```json
-      {
-        "event": "BA",
-        "zone": "03",
-        "message": "Simulovaný poplach"
-      }
-      ```
-    - Node vygeneruje event do prvního výstupu.
+11. **HTTP endpoint**
+    - `POST /sia-server/:id/event`  
+      - Vyžaduje právo `sia-server.write`.  
+      - Tělo JSON ve tvaru `{ "event":"BA", "zone":"03", "message":"Test" }`  
+      - Node vytvoří event do prvního výstupu.
+
+---
 
 ## Instalace
 
-1. V terminálu (v adresáři `~/.node-red`) spusťte:
+1. V adresáři Node-RED (`~/.node-red`) spusťte:
    ```bash
    npm install github:mchlup/Node-Red-SIA-Server
