@@ -109,8 +109,7 @@ module.exports = function (RED) {
 
                                 // Odeslat polling-ack („P#<account>“) pokud je autoRespondPolling
                                 if (autoRespondPolling) {
-                                    let resp = pollResponseTemplate
-                                              .replace("${account}", sia.account);
+                                    let resp = pollResponseTemplate.replace("${account}", sia.account);
                                     socket.write(resp + "\r\n");
                                     node.log(`Odesílám polling ack: ${resp}`);
                                 }
@@ -360,7 +359,6 @@ module.exports = function (RED) {
                 if (raw.startsWith("F#")) {
                     result.protocol = "GATEWAY-POLL";
                     let acctVal = raw.slice(2).trim();
-                    // Odstraníme netisknutelné znaky, vezmeme prvních několik čísel
                     let acctMatch = acctVal.match(/^\d+/);
                     result.account = acctMatch ? acctMatch[0] : acctVal;
                     result.event = "POLL";
@@ -369,7 +367,6 @@ module.exports = function (RED) {
                     result.valid = true;
                     return result;
                 }
-
                 // --- 5) Neznámý formát ---
                 result.error = "Unrecognized format";
                 return result;
