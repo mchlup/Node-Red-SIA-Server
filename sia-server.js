@@ -2,7 +2,7 @@ const net = require("net");
 const crc = require("crc");
 const fs = require("fs");
 const crypto = require("crypto");
-const axios = require("axios"); // pro volitelný push-webhook (npm install axios)
+const axios = require("axios");
 
 module.exports = function (RED) {
 
@@ -65,7 +65,7 @@ module.exports = function (RED) {
         const autoRespondPolling = nodeConfig.autoRespondPolling;
         const pollResponseTemplate = nodeConfig.pollResponseTemplate;
         const pushWebhookUrl = nodeConfig.pushWebhookUrl;
-        const debugMode = config.debugMode || true;
+        const debugMode = config.debugMode || false;
         const rawOutput = config.rawOutput || false;
 
         let clientSockets = [];
@@ -114,7 +114,7 @@ module.exports = function (RED) {
                 node.log(`Klient připojen: ${socket.remoteAddress}:${socket.remotePort}`);
                 node.status({ fill: "green", shape: "dot", text: `Připojeno od ${socket.remoteAddress}` });
 
-                // Reset pendingFragment, ackTimeout i keepAlive
+                // Reset pendingFragment, ackTimeout a keepAlive
                 pendingFragment = null;
                 if (ackTimeouts.has(socket)) {
                     clearTimeout(ackTimeouts.get(socket));
@@ -164,7 +164,7 @@ module.exports = function (RED) {
                             if (sia.protocol === "GATEWAY-POLL") {
                                 sia.localizedMessage = localize("POLL", sia.account);
 
-                                // Pokus zrušit existující ackTimeout
+                                // Zrušit existující ackTimeout, pokud je
                                 if (ackTimeouts.has(socket)) {
                                     clearTimeout(ackTimeouts.get(socket));
                                     ackTimeouts.delete(socket);
@@ -296,6 +296,7 @@ module.exports = function (RED) {
                                     account: sia.account,
                                     event: sia.event,
                                     zone: sia.zone,
+                                    zoneName: sia.zoneName || null,
                                     message: sia.message,
                                     timestamp: new Date().toISOString(),
                                     extensions: sia.extensions || null,
@@ -309,7 +310,7 @@ module.exports = function (RED) {
                             // --- Chybný formát / CRC / neznámý formát ---
                             node.warn(`Chyba parsování: ${sia.error}`);
                             if (sia.protocol === "SIA-DCS" && sia.error === messages[language].SIA_CRC_ERR) {
-                                // Pokud SIA-DCS s CRC, pošleme NAK
+                                // Pokud SIA-DCS s CRC, pošlete NAK
                                 let nak = buildNak(sia.sequence, receiverID || defaultAccount);
                                 node.log(`Odesílám NAK: ${nak.trim()}`);
                                 socket.write(nak);
@@ -469,7 +470,7 @@ module.exports = function (RED) {
         });
 
         // ================================================
-        // Parser (SIA-DCS, ADM-CID, polling, AES, fragmentace, extensions, DIAG)
+        // Parser (SIA-DCS, ADM-CID, polling, AES, fragmentace, extensions, DIAG, iBD eventy)
         // ================================================
         function tryParseSia(frame, defaultAcct, crcMethod) {
             let result = {
@@ -495,8 +496,11 @@ module.exports = function (RED) {
                     raw = decryptAesFrame(raw, aesKey);
                 }
 
-                // --- 2) SIA-DCS (DC-09) s volitelným CRC-16 a extensions ---
-                // Regex zachytí: [1]=sequence, [2]=payload (prostřední řetězec), [3]=čtyřmístný CRC (nepovinné)
+                // --- 2) SIA-DCS (DC-09) s volitelným CRC-16 (XModem/X.25) a extensions ---
+                // Regex zachytí: 
+                //   [1]=sequence (číslo), 
+                //   [2]=payload (hlavní řetězec uvnitř uvozovek),
+                //   [3]=čtyřmístný CRC (nepovinné)
                 let siaRe = /^SIA-DCS\s+[0-9A-Fa-f]+\s*(\d+)?\s*"(.*)"\s*([0-9A-Fa-f]{4})?$/;
                 let m = siaRe.exec(raw);
                 if (m) {
@@ -504,6 +508,7 @@ module.exports = function (RED) {
                     result.sequence = m[1] || null;
                     let payloadAndExt = m[2];  // např. "[BA|01]poplach|EXT=BatteryLow|TIMESTAMP=..."
                     let receivedCrc = m[3];    // může být undefined
+
                     // CRC ověření, pokud přítomno
                     if (receivedCrc) {
                         let withoutCrc = raw.substring(0, raw.lastIndexOf(`"${payloadAndExt}"`) + payloadAndExt.length + 2);
@@ -515,11 +520,13 @@ module.exports = function (RED) {
                             return result;
                         }
                     }
+
                     // Rozdělit payload a případné extensions
                     let parts = payloadAndExt.split("|");
                     let mainPart = parts.shift(); // např. "[BA|01]poplach"
                     let extParts = parts;         // např. ["EXT=BatteryLow","TIMESTAMP=20250607T134500"]
-                    // Parsování hlavního payloadu
+
+                    // Parsování hlavního payloadu: [EVENT|ZONE(:PART)]Message
                     let evtRe = /^\[([A-Z0-9]+)\|([A-Z0-9]+)(?::([0-9]+))?\](.*)$/;
                     let em = evtRe.exec(mainPart);
                     if (!em) {
@@ -530,6 +537,7 @@ module.exports = function (RED) {
                     result.zone = em[2];
                     result.partition = em[3] || null;
                     result.message = em[4];
+
                     // Parsování extensions do objektu
                     if (extParts.length) {
                         let exts = {};
@@ -541,16 +549,18 @@ module.exports = function (RED) {
                         });
                         result.extensions = exts;
                     }
+
                     // Pokud je to diagnostický kód (např. DIAG, LANERR, NETDOWN), označíme
-                    if (result.event === "DIAG" ||
-                        ["LANERR", "NETDOWN", "PSUPPLY", "PDUERR"].includes(result.event)) {
+                    const diagnosticCodes = ["DIAG", "LANERR", "NETDOWN", "PSUPPLY", "PDUERR"];
+                    if (result.event === "DIAG" || diagnosticCodes.includes(result.event)) {
                         result.isDiagnostic = true;
                     }
+
                     result.valid = true;
                     return result;
                 }
 
-                // --- 3) ADM-CID (Contact-ID) s CRC-16 ---
+                // --- 3) ADM-CID (Contact-ID) s CRC-16 (XModem) ---
                 let admRe = /^ADM-CID\s+([\d]+)\s+([\d]+)\s*\[(.*)\]([0-9A-Fa-f]{4})$/;
                 let n = admRe.exec(raw);
                 if (n) {
@@ -617,7 +627,6 @@ module.exports = function (RED) {
         // Dešifrování AES-128-CBC (hex: IV + ciphertext)
         // ================================================
         function decryptAesFrame(frame, keyHex) {
-            // formát: "AES#"<IV(32hex)><CIPHERTEXT(hex)>
             let hexData = frame.slice(4).trim();
             let iv = Buffer.from(hexData.slice(0, 32), "hex");
             let ct = Buffer.from(hexData.slice(32), "hex");
@@ -628,8 +637,7 @@ module.exports = function (RED) {
         }
 
         // ================================================
-        // Parsování Contact-ID payload
-        // formát: event=… zone=… user=… code=…
+        // Parsování Contact-ID payload (event=… zone=… user=… code=…)
         // ================================================
         function parseContactIdPayload(text, result) {
             let parts = text.split(/\s+/);
@@ -669,7 +677,7 @@ module.exports = function (RED) {
         // Logování do souboru (včetně extensions)
         // ================================================
         function logEvent(sia) {
-            // zapíšeme: ISO8601,Account,Event,Zone,Message,Extensions_JSON
+            // Zapsat do formátu: ISO8601,Account,Event,Zone,Message,Extensions_JSON
             let extJson = sia.extensions ? JSON.stringify(sia.extensions) : "";
             let line = `${new Date().toISOString()},${sia.account},${sia.event},${sia.zone || ""},${sia.message},${extJson}\n`;
             fs.appendFile("/home/nodered/sia-events.log", line, err => {
