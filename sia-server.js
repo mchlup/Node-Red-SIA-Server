@@ -27,11 +27,11 @@ module.exports = function (RED) {
         }
 
         const node = this;
-        const port       = parseInt(nodeConfig.port) || 10002;
+        const port       = parseInt(nodeConfig.port) || 10000;
         const password   = nodeConfig.password || "";
-        const account    = nodeConfig.account || "";
-        const debugMode  = config.debugMode || false;
-        const rawOutput  = config.rawOutput || false;
+        const account    = nodeConfig.account || "123456";
+        const debugMode  = config.debugMode || true;
+        const rawOutput  = config.rawOutput || true;
 
         let clientSockets = [];
 
@@ -49,6 +49,14 @@ module.exports = function (RED) {
                     let sia = tryParseSia(frame, password, account);
 
                     if (sia.valid) {
+                        // Zpracování polling rámců (F#)
+                        if (sia.protocol === "GATEWAY-POLL") {
+                            // Poslat do prvního výstupu jako parsovanou zprávu
+                            node.send([{ payload: sia, raw: frame, account: sia.account }, null]);
+                            continue;
+                        }
+
+                        // Standardní SIA-DCS / ADM-CID – odešleme ACK
                         if (debugMode) {
                             node.send([null, { raw: frame, parsed: sia, timestamp: Date.now() }]);
                         }
@@ -146,27 +154,41 @@ module.exports = function (RED) {
             };
 
             try {
+                // 1) SIA-DCS nebo ADM-CID
                 let siaRe = /^(SIA-DCS|ADM-CID)\s+([0-9A-Fa-f]+)?\s*(\d+)?\s*"(.*)"$/;
                 let m = siaRe.exec(frame.trim());
-                if (!m) {
-                    result.error = "Špatný formát (ne SIA-DCS/ADM-CID).";
+                if (m) {
+                    result.protocol = m[1];
+                    result.sequence = m[3] || null;
+                    let payload = m[4];
+                    let evtRe = /^\[([A-Z0-9]+)\|([A-Z0-9]+)\](.*)$/;
+                    let em = evtRe.exec(payload);
+                    if (!em) {
+                        result.error = "Payload nesplňuje [EVENT|ZONE]Syntax.";
+                        return result;
+                    }
+                    result.event = em[1];
+                    result.zone = em[2];
+                    result.message = em[3];
+                    result.valid = true;
                     return result;
                 }
-                result.protocol = m[1];
-                result.sequence = m[3] || null;
-                let payload = m[4];
 
-                let evtRe = /^\[([A-Z0-9]+)\|([A-Z0-9]+)\](.*)$/;
-                let em = evtRe.exec(payload);
-                if (!em) {
-                    result.error = "Payload nesplňuje [EVENT|ZONE]Syntax.";
+                // 2) Pokud rámec začíná "F#", považujeme to za polling/keep-alive
+                if (frame.startsWith("F#")) {
+                    result.protocol = "GATEWAY-POLL";
+                    result.sequence = null;
+                    result.event = "POLL";
+                    result.zone = frame.slice(2).trim();
+                    result.message = "Polling / keep-alive frame";
+                    result.valid = true;
                     return result;
                 }
-                result.event = em[1];
-                result.zone = em[2];
-                result.message = em[3];
-                result.valid = true;
+
+                // 3) Jiné nestandardní formáty
+                result.error = "Unrecognized format";
                 return result;
+
             } catch (e) {
                 result.error = "Parse exception: " + e.message;
                 return result;
