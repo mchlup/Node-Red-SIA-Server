@@ -37,7 +37,7 @@
         defaults: {
             name:      { value: "" },
             config:    { type: "sia-server-config", required: true },
-            debugMode: { value: true, required: false },
+            debugMode: { value: false, required: false },
             rawOutput: { value: false, required: false }
         },
         inputs:  1,
@@ -162,17 +162,17 @@
         <li><b>Account ID:</b> (volitelné) SIA-ID ústředny (např. „000997“). Pokud není zadáno, parser ho vezme z polling rámce.</li>
         <li><b>Receiver ID:</b> (volitelné) ID, které se vrací v ACK jako druhý parametr. Pokud není zadáno, použije se Account ID.</li>
         <li><b>Povolené události:</b> CSV event kódů (např. „BA,BF,GC“) – ostatní se ignorují.</li>
-        <li><b>Mapování zón:</b> JSON objekt pro přeložení čísel zón (např. {"01":"Vchod"}).</li>
+        <li><b>Mapování zón:</b> JSON objekt pro přeložení čísel zón (např. {"01":"Vchod","02":"Garáž"}).</li>
         <li><b>Použít AES:</b> Zaškrtněte, pokud ústředna posílá šifrované SIA rámce (AES-128-CBC).</li>
         <li><b>AES klíč:</b> Hexadecimální řetězec 16 bajtů (32 znaků), pokud je AES aktivní.</li>
         <li><b>Interval obnovení:</b> Počet sekund, po kterých se server pokusí restartovat naslouchání po chybě či odpojení.</li>
         <li><b>Povolení uživatelé:</b> CSV PIN kódů (např. „0001,0002“) – ARM/DISARM jen od těchto uživatelů.</li>
         <li><b>Jazyk:</b> Lokalizace textů („en“ / „cs“).</li>
         <li><b>CRC metoda:</b> Vyberte „xmodem“ (výchozí) nebo „x25“, podle manuálu ústředny.</li>
-        <li><b>Timeout po ACK (ms):</b> Čas v ms (výchozí 2000), po kterém, pokud po ACK nepřijde platné SIA-DCS, server uzavře socket.</li>
+        <li><b>Timeout po ACK (ms):</b> Čas v ms (výchozí 2000), po kterém, pokud po ACK nepřijde validní SIA-DCS, server uzavře socket.</li>
         <li><b>Keep-alive interval (ms):</b> Čas v ms (výchozí 60000). Server posílá „F#<ReceiverID>“ pokud od ústředny nepřijde žádný paket.</li>
         <li><b>Automatická odpověď na polling:</b> Pokud je zaškrtnuto, po přijetí „F#…“ server odešle ACK podle šablony.</li>
-        <li><b>Šablona odpovědi:</b> Např. <code>P#${account}</code>, podporuje <code>${account}</code> a <code>${zone}</code> (popř. <code>${suffix}</code>).</li>
+        <li><b>Šablona odpovědi:</b> Např. <code>P#${account}</code>, podporuje <code>${account}</code>, <code>${zone}</code> a <code>${suffix}</code>.</li>
         <li><b>Push Webhook URL:</b> (volitelné) Pošle JSON eventu na uvedenou URL (HTTP POST).</li>
       </ul>
     </p>
@@ -196,33 +196,38 @@
         <li><b>SIA-DCS (DC-09 Level 4):</b>  
             <ul>
               <li>Parsuje payload <code>[EVENT|ZONE:PART]Message</code>.</li>
-              <li>Podpora volitelného <b>CRC-16</b> (XModem nebo X.25) – pokud extistuje na konci rámce, ověří se.</li>
-              <li>Podpora <b>multi-fragmentace</b> – pokud řetězec končí „…“, akumuluje se do `pendingFragment` a čeká na další část.</li>
+              <li>Podpora volitelného <b>CRC-16</b> (XModem nebo X.25) – pokud existuje v konci rámce, ověří se.</li>
+              <li>Podpora <b>multi-fragmentace</b> – pokud zpráva končí „…“, akumuluje se do <code>pendingFragment</code> a čeká se na další část.</li>
               <li>Podpora <b>extensions</b> (za základním payloadem oddělené „|“), např. <code>EXTENSION=BatteryLow|TIMESTAMP=20250607T134500</code>.</li>
-              <li>Podpora <b>DIAG</b> – diagnostické pakety <code>[DIAG|…]…</code>.</li>
-              <li>Podpora iBD eventů (např. <code>LANERR</code>, <code>NETDOWN</code>) – lze rozšířit o vlastní seznam diagnostických kódů.</li>
-              <li>Po úspěšném parsování (a případné verifikaci CRC) se odešle <code>ACK <seq> <ReceiverID>\r\n</code> a event se pošle do prvního výstupu.</li>
+              <li>Podpora <b>diagnostických</b> („DIAG“) a iBD eventů („LANERR“, „NETDOWN“ apod.).</li>
+              <li>Po úspěšném parsování (včetně CRC) se odesílá <code>ACK <seq> <ReceiverID>\r\n</code> a event se předává do prvního výstupu (<code>msg.payload</code>).</li>
             </ul>
         </li>
         <li><b>Contact-ID (ADM-CID):</b>  
             <ul>
-              <li>Parsuje payload typu <code>event=… zone=… user=…</code> s ověřením CRC-16.</li>
-              <li>Neodesílá ACK (Contact-ID používá vlastní protokol). Po validaci se event pošle do prvního výstupu.</li>
+              <li>Parsuje payload typu <code>event=… zone=… user=…</code> s ověřením CRC-16 (XModem).</li>
+              <li>Po úspěšné verifikaci se event pošle do prvního výstupu. U ADM-CID se neodesílá ACK (Contact-ID používá vlastní protokol).</li>
             </ul>
         </li>
-        <li><b>Push-Webhook (volitelné):</b>  
+        <li><b>AES-128-CBC:</b>  
             <ul>
-              <li>Pokud je <code>pushWebhookUrl</code> zadán, pošle se každý validní event (SIA-DCS i Contact-ID) jako JSON do této URL metodou HTTP POST.</li>
+              <li>Pokud je <code>useAes</code> zaškrtnuto, dešifruje se rámec typu <code>AES#<IV(32hex)><ciphertext(hex)></code> a pak se parsuje jako běžný SIA-DCS.</li>
+            </ul>
+        </li>
+        <li><b>Receiver ID vs Account ID:</b>  
+            <ul>
+              <li><code>Account ID</code> se bere z nastavení nebo polling rámce.  
+              <li><code>Receiver ID</code> se použije jako druhý parametr v ACK/NAK (<code>ACK <seq> <ReceiverID>\r\n</code>).</li>
             </ul>
         </li>
         <li><b>Role-based ARM/DISARM:</b>  
             <ul>
-              <li>Pro příkazy <code>payload.action = "ARM"</code> nebo <code>"DISARM"</code> server kontroluje, zda <code>payload.code</code> je v <code>allowedUsers</code>. Jinak vrátí chybu.</li>
+              <li>Příkaz <code>payload.action = "ARM"</code> nebo <code>"DISARM"</code> kontroluje, zda <code>payload.code</code> je v <code>allowedUsers</code>. Jinak vrátí chybu.</li>
             </ul>
         </li>
         <li><b>Filtrace eventů:</b>  
             <ul>
-              <li>Pokud je <code>allowedEvents</code> neprázdné, přijmou se pouze event kódy z toho seznamu.</li>
+              <li>Pokud je <code>allowedEvents</code> neprázdné, přijímají se pouze eventy z tohoto seznamu.</li>
             </ul>
         </li>
         <li><b>Mapování zón:</b>  
@@ -232,14 +237,19 @@
         </li>
         <li><b>Logování:</b>  
             <ul>
-              <li>Každá validní událost se zapíše do <code>/home/nodered/sia-events.log</code> ve formátu <code>ISO8601,Account,Event,Zone,Message,Extensions_JSON</code>.</li>
+              <li>Každá platná událost se zapíše do <code>/home/nodered/sia-events.log</code> ve formátu <code>ISO8601,Account,Event,Zone,Message,Extensions_JSON</code>.</li>
             </ul>
         </li>
         <li><b>Status v UI:</b>  
             <ul>
               <li>Zelená tečka = server naslouchá.</li>
-              <li>Červený kroužek = odpojeno.</li>
-              <li>Žlutý kroužek = chyba parsování nebo CRC (např. „SIA-CSD CRC mismatch“).</li>
+              <li>Červený kroužek = odpojeno nebo chybějící port.</li>
+              <li>Žlutý kroužek = chyba parsování / CRC (např. „SIA-CSD CRC mismatch“).</li>
+            </ul>
+        </li>
+        <li><b>Push-Webhook (volitelné):</b>  
+            <ul>
+              <li>Pokud je <code>pushWebhookUrl</code> nastaveno, pošle se každý validní event (SIA-DCS i Contact-ID) jako JSON metodou HTTP POST.</li>
             </ul>
         </li>
         <li><b>HTTP endpoint:</b>  
@@ -247,7 +257,7 @@
               <li><code>POST /sia-server/:id/event</code>  
                   - Vyžaduje právo <code>sia-server.write</code>.  
                   - Tělo JSON: <code>{"event":"BA","zone":"03","message":"Test"}</code>.  
-                  - Server vygeneruje event do prvního výstupu.</li>
+                  - Node vytvoří event do prvního výstupu.</li>
             </ul>
         </li>
       </ul>
