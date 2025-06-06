@@ -1,7 +1,7 @@
 {
   "name": "node-red-contrib-sia-server",
   "version": "1.0.9",
-  "description": "Node-RED node for SIA DC-09 IP server (alarm receiver) with full support for Honeywell Galaxy Dimension (polling, CRC XModem/X.25, AES, keep-alive, fragmentation, extensions, diagnostic, Receiver ID, push-webhook, etc.).",
+  "description": "Node-RED node for SIA DC-09 IP server (alarm receiver) with full support for Honeywell Galaxy Dimension (polling, CRC XModem/X.25, AES, keep-alive, fragmentation, extensions, diagnostic, Receiver ID, push-webhook, PCVue mappings, etc.).",
   "keywords": [
     "node-red",
     "sia",
@@ -19,14 +19,16 @@
     "extensions",
     "keepalive",
     "diagnostic",
-    "push"
+    "push",
+    "PCVue"
   ],
   "repository": {
     "type": "git",
     "url": "https://github.com/mchlup/Node-Red-SIA-Server"
   },
   "dependencies": {
-    "crc": "^3.8.0"
+    "crc": "^3.8.0",
+    "axios": "^1.4.0"
   },
   "node-red": {
     "nodes": {
