@@ -1,0 +1,71 @@
+<script type="text/javascript">
+    // Konfigurační node (config node)
+    RED.nodes.registerType('sia-server-config', {
+        category: 'config',
+        defaults: {
+            name: { value: "" },
+            port: { value: 10002, required: true },
+            password: { value: "", required: false },
+            account: { value: "", required: false }
+        },
+        label: function() {
+            return this.name || ("SIA Config " + this.port);
+        }
+    });
+
+    // Hlavní node (využívá config node)
+    RED.nodes.registerType('sia-server', {
+        category: 'sia-server',  // vlastní sekce v paletě
+        color: '#A6BBCF',
+        defaults: {
+            name:      { value: "" },
+            config:    { type: "sia-server-config", required: true }, // propojení na config node
+            debugMode: { value: false, required: false },
+            rawOutput: { value: false, required: false }
+        },
+        inputs: 1,
+        outputs: 2,
+        icon: "network.png",
+        label: function() {
+            return this.name || "SIA Server";
+        }
+    });
+</script>
+
+<!-- Config node dialog -->
+<div id="node-config-sia-server-config" class="form-tab">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="icon-tag"></i> Název</label>
+        <input type="text" id="node-config-input-name">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-port"><i class="icon-globe"></i> Port (TCP)</label>
+        <input type="number" id="node-config-input-port" placeholder="10002">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-password"><i class="icon-lock"></i> Heslo/PIN (volitelné)</label>
+        <input type="text" id="node-config-input-password">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-account"><i class="icon-user"></i> Číslo účtu (volitelné)</label>
+        <input type="text" id="node-config-input-account">
+    </div>
+</div>
+
+<!-- Main node dialog -->
+<div class="form-row">
+    <label for="node-input-name"><i class="icon-tag"></i> Název</label>
+    <input type="text" id="node-input-name">
+</div>
+<div class="form-row">
+    <label for="node-input-config"><i class="icon-cog"></i> Nastavení serveru</label>
+    <input type="text" id="node-input-config">
+</div>
+<div class="form-row">
+    <label for="node-input-debugMode"><i class="icon-bug"></i> Aktivovat DEBUG režim</label>
+    <input type="checkbox" id="node-input-debugMode">
+</div>
+<div class="form-row">
+    <label for="node-input-rawOutput"><i class="icon-eye"></i> Přeposílat RAW zprávy</label>
+    <input type="checkbox" id="node-input-rawOutput">
+</div>
