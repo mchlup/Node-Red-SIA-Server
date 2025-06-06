@@ -6,6 +6,15 @@
   "dependencies": {
     "crc": "^3.8.0"
   },
+  "keywords": [
+        "node-red",
+        "SIA",
+        "alarm"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/mchlup/Node-Red-SIA-Server"
+    },
   "node-red": {
     "nodes": {
       "sia-server": "sia-server.js"
