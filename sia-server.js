@@ -14,9 +14,7 @@ module.exports = function (RED) {
         this.port = parseInt(n.port) || 10000;
         this.password = n.password || "";
         this.account = n.account || "";
-        // CSV → pole
         this.allowedEvents = (n.allowedEvents || "").split(",").map(s => s.trim()).filter(s => s);
-        // JSON → objekt
         try {
             this.zoneMap = n.zoneMap ? JSON.parse(n.zoneMap) : {};
         } catch(err) {
@@ -28,6 +26,7 @@ module.exports = function (RED) {
         this.allowedUsers = (n.allowedUsers || "").split(",").map(s => s.trim()).filter(s => s);
         this.language = n.language || "en";
         this.autoRespondPolling = n.autoRespondPolling || true;
+        // Výchozí šablona: odpověď na polling musí být "P#<account>"
         this.pollResponseTemplate = n.pollResponseTemplate || "P#${account}";
     }
     RED.nodes.registerType("sia-server-config", SiaServerConfigNode);
@@ -38,7 +37,6 @@ module.exports = function (RED) {
     function SiaServerNode(config) {
         RED.nodes.createNode(this, config);
 
-        // Získání konfiguračního node
         const nodeConfig = RED.nodes.getNode(config.config);
         if (!nodeConfig) {
             this.error("Není přiřazen žádný konfigurační node!");
@@ -47,8 +45,7 @@ module.exports = function (RED) {
 
         const node = this;
         const port = nodeConfig.port;
-        const password = nodeConfig.password;
-        const accountDefault = nodeConfig.account;
+        const defaultAccount = nodeConfig.account;
         const allowedEvents = nodeConfig.allowedEvents;
         const zoneMap = nodeConfig.zoneMap;
         const useAes = nodeConfig.useAes;
@@ -64,7 +61,7 @@ module.exports = function (RED) {
         let clientSockets = [];
         let server = null;
 
-        // Lokalizační zprávy
+        // Lokalizační zprávy (CS/EN)
         const messages = {
             en: {
                 BA: "Burglary Alarm",
@@ -90,7 +87,9 @@ module.exports = function (RED) {
             }
         };
 
+        // ================================
         // Spuštění TCP serveru
+        // ================================
         function startServer() {
             server = net.createServer((socket) => {
                 clientSockets.push(socket);
@@ -102,28 +101,33 @@ module.exports = function (RED) {
                     let frames = data.split("\r\n").filter(x => x.trim().length > 0);
                     for (let frame of frames) {
                         node.log(`Přijato (raw): ${frame}`);
-                        let sia = tryParseSia(frame, password, accountDefault);
+                        let sia = tryParseSia(frame, defaultAccount);
                         if (sia.valid) {
-                            // === Polling ===
+                            // === Polling („F#…“) ===
                             if (sia.protocol === "GATEWAY-POLL") {
                                 sia.localizedMessage = localize("POLL", sia.account);
 
-                                // Automatická odpověď na polling
+                                // Odeslat polling-ack („P#<account>“) pokud je autoRespondPolling
                                 if (autoRespondPolling) {
                                     let resp = pollResponseTemplate
-                                                .replace("${account}", sia.account)
-                                                .replace("${zone}", sia.zone || "");
+                                              .replace("${account}", sia.account);
                                     socket.write(resp + "\r\n");
                                     node.log(`Odesílám polling ack: ${resp}`);
                                 }
 
-                                node.send([{ payload: sia, raw: frame, account: sia.account, timestamp: new Date().toISOString() }, null]);
+                                // Pošle do prvního výstupu objekt s polling daty
+                                node.send([{
+                                    payload: sia,
+                                    raw: frame,
+                                    account: sia.account,
+                                    timestamp: new Date().toISOString()
+                                }, null]);
                                 continue;
                             }
 
-                            // === Standardní SIA-DCS / ADM-CID ===
+                            // === Standardní SIA-DCS (DC-09) ===
                             if (sia.protocol === "SIA-DCS") {
-                                // Filtrace povolených eventů
+                                // Filtrace povolených eventů (pokud je vyplněno)
                                 if (allowedEvents.length && !allowedEvents.includes(sia.event)) {
                                     node.log(`Ignoruji událost ${sia.event}`);
                                     continue;
@@ -133,21 +137,26 @@ module.exports = function (RED) {
                                 node.log(`Odesílám ACK: ${ack.trim()}`);
                                 socket.write(ack);
                             }
-                            // U ADM-CID (Contact-ID) se neodesílá ACK, používá se CRC
+                            // === Contact-ID (ADM-CID) – neodesíláme ACK, pouze zpracujeme ===
 
-                            // Mapování zón
+                            // Mapování zóny (pokud existuje)
                             if (sia.zone && zoneMap[sia.zone]) {
                                 sia.zoneName = zoneMap[sia.zone];
                             }
                             // Lokalizace
                             sia.localizedMessage = localize(sia.event, sia.zone);
-                            // Logování
+                            // Logování do souboru
                             logEvent(sia);
-                            // Poslat do prvního výstupu
-                            node.send([{ payload: sia, raw: frame, account: sia.account, timestamp: new Date().toISOString() }, null]);
+                            // Pošleme do prvního výstupu
+                            node.send([{
+                                payload: sia,
+                                raw: frame,
+                                account: sia.account,
+                                timestamp: new Date().toISOString()
+                            }, null]);
 
                         } else {
-                            // === Chybný formát / CRC / neznámé ===
+                            // === Špatný formát / CRC / neznámý formát ===
                             node.warn(`Chyba parsování: ${sia.error}`);
                             if (sia.protocol === "SIA-DCS") {
                                 let nak = buildNak(sia.sequence);
@@ -155,7 +164,11 @@ module.exports = function (RED) {
                                 socket.write(nak);
                             }
                             if (rawOutput || debugMode) {
-                                node.send([null, { error: sia.error, raw: frame, timestamp: new Date().toISOString() }]);
+                                node.send([null, {
+                                    error: sia.error,
+                                    raw: frame,
+                                    timestamp: new Date().toISOString()
+                                }]);
                             }
                             node.status({ fill: "yellow", shape: "ring", text: `"${sia.error}"` });
                             setTimeout(() => node.status({}), 3000);
@@ -166,17 +179,24 @@ module.exports = function (RED) {
                 socket.on("close", () => {
                     node.log(`Klient odpojen: ${socket.remoteAddress}`);
                     clientSockets = clientSockets.filter(s => s !== socket);
-                    node.send([null, { event: "disconnect", ip: socket.remoteAddress, timestamp: new Date().toISOString() }]);
+                    node.send([null, {
+                        event: "disconnect",
+                        ip: socket.remoteAddress,
+                        timestamp: new Date().toISOString()
+                    }]);
                     node.status({ fill: "red", shape: "ring", text: "Odpojeno" });
                 });
 
                 socket.on("error", (err) => {
                     node.error(`Socket error: ${err.message}`);
-                    node.send([null, { error: err.message, timestamp: new Date().toISOString() }]);
+                    node.send([null, {
+                        error: err.message,
+                        timestamp: new Date().toISOString()
+                    }]);
                     node.status({ fill: "red", shape: "ring", text: "Chyba socketu" });
                     clientSockets = clientSockets.filter(s => s !== socket);
                     socket.destroy();
-                    // Pokus o restart serveru po reconnectInterval sekundách
+                    // Po reconnectInterval sekundách restartujeme server
                     setTimeout(() => {
                         try {
                             startServer();
@@ -207,10 +227,11 @@ module.exports = function (RED) {
 
         startServer();
 
+        // ================================
+        // Při vypnutí node
+        // ================================
         this.on("close", () => {
-            if (server) {
-                server.close();
-            }
+            if (server) server.close();
             clientSockets.forEach(s => s.destroy());
             clientSockets = [];
             node.status({});
@@ -218,7 +239,7 @@ module.exports = function (RED) {
         });
 
         // ================================
-        // Zpracování vstupu (ARM/DISARM/CUSTOM)
+        // Zpracování vstupu (ARM / DISARM / CUSTOM)
         // ================================
         node.on("input", (msg) => {
             try {
@@ -227,11 +248,13 @@ module.exports = function (RED) {
                 }
                 let cmd = msg.payload.action;
                 let userCode = msg.payload.code || "";
-                // Kontrola oprávnění pro ARM/DISARM
-                if ((cmd === "ARM" || cmd === "DISARM") && allowedUsers.length && !allowedUsers.includes(userCode)) {
+                // Kontrola oprávnění pro ARM / DISARM
+                if ((cmd === "ARM" || cmd === "DISARM")
+                    && allowedUsers.length
+                    && !allowedUsers.includes(userCode)) {
                     throw new Error(localize("UNAUTHORIZED", ""));
                 }
-                let destAccount = msg.payload.account || accountDefault;
+                let destAccount = msg.payload.account || defaultAccount;
                 let partition   = msg.payload.partition || "";
                 let customFrame = msg.payload.customFrame || "";
                 if (clientSockets.length === 0) {
@@ -255,22 +278,28 @@ module.exports = function (RED) {
 
                 node.log(`Odesílám ústředně: ${frameToSend.trim()}`);
                 socket.write(frameToSend);
-                node.send([{ info: `Posláno: ${cmd}`, timestamp: new Date().toISOString() }, null]);
+                node.send([{
+                    info: `Posláno: ${cmd}`,
+                    timestamp: new Date().toISOString()
+                }, null]);
             } catch (err) {
                 node.error(err.message);
-                node.send([null, { error: err.message, timestamp: new Date().toISOString() }]);
+                node.send([null, {
+                    error: err.message,
+                    timestamp: new Date().toISOString()
+                }]);
             }
         });
 
         // ================================
-        // Parser pro SIA-DC-09, ADM-CID s CRC, polling a AES
+        // Parser (SIA-DCS, ADM-CID, polling, AES)
         // ================================
-        function tryParseSia(frame, pwd, acct) {
+        function tryParseSia(frame, defaultAcct) {
             let result = {
                 valid: false,
                 error: null,
                 sequence: null,
-                account: acct,
+                account: defaultAcct,
                 protocol: null,
                 event: null,
                 zone: null,
@@ -281,18 +310,18 @@ module.exports = function (RED) {
 
             let raw = frame.trim();
             try {
-                // 1) Pokud použít AES, dešifrovat
+                // --- 1) AES dešifrování, pokud je aktivní ---
                 if (useAes && raw.startsWith("AES#")) {
                     raw = decryptAesFrame(raw, aesKey);
                 }
 
-                // 2) SIA-DCS (DC-09)
-                let siaRe = /^(SIA-DCS)\s+([0-9A-Fa-f]+)?\s*(\d+)?\s*"(.*)"$/;
+                // --- 2) SIA-DCS (DC-09) ---
+                let siaRe = /^(SIA-DCS)\s+[0-9A-Fa-f]+\s*(\d+)?\s*"(.*)"$/;
                 let m = siaRe.exec(raw);
                 if (m) {
                     result.protocol = "SIA-DCS";
-                    result.sequence = m[3] || null;
-                    let payload = m[4];
+                    result.sequence = m[2] || null;
+                    let payload = m[3];
                     let evtRe = /^\[([A-Z0-9]+)\|([A-Z0-9]+)(?::([0-9]+))?\](.*)$/;
                     let em = evtRe.exec(payload);
                     if (!em) {
@@ -307,7 +336,7 @@ module.exports = function (RED) {
                     return result;
                 }
 
-                // 3) ADM-CID (SIA-DC-05) s CRC-16
+                // --- 3) ADM-CID (SIA-DC-05) s CRC-16 ---
                 let admRe = /^ADM-CID\s+([\d]+)\s+([\d]+)\s*\[(.*)\]([0-9A-Fa-f]{4})$/;
                 let n = admRe.exec(raw);
                 if (n) {
@@ -315,7 +344,6 @@ module.exports = function (RED) {
                     result.sequence = n[2];
                     let payload = n[3];
                     let receivedCrc = n[4];
-                    // Ověření CRC-16
                     let dataForCrc = raw.substring(0, raw.lastIndexOf("]") + 1);
                     let actualCrc = crc.crc16xmodem(Buffer.from(dataForCrc, "ascii"))
                                       .toString(16).toUpperCase().padStart(4, "0");
@@ -323,43 +351,36 @@ module.exports = function (RED) {
                         result.error = "CRC mismatch";
                         return result;
                     }
-                    // Parsování payloadu
                     parseContactIdPayload(payload, result);
                     result.valid = true;
                     return result;
                 }
 
-                // 4) Pollingový rámec "F#"
+                // --- 4) Pollingový rámec "F#<Account>" ---
                 if (raw.startsWith("F#")) {
                     result.protocol = "GATEWAY-POLL";
-                    result.sequence = null;
-                    // Vše po "F#" považujeme za account
                     let acctVal = raw.slice(2).trim();
-                    // Některé alarmy přidávají netisknutelné znaky—odstraníme pouze číslice
+                    // Odstraníme netisknutelné znaky, vezmeme prvních několik čísel
                     let acctMatch = acctVal.match(/^\d+/);
                     result.account = acctMatch ? acctMatch[0] : acctVal;
-                    result.zone = null;
                     result.event = "POLL";
+                    result.zone = null;
                     result.message = "Polling / keep-alive frame";
                     result.valid = true;
                     return result;
                 }
 
-                // 5) Jiné formáty
+                // --- 5) Neznámý formát ---
                 result.error = "Unrecognized format";
                 return result;
-
             } catch (e) {
                 result.error = "Parse exception: " + e.message;
                 return result;
             }
         }
 
-        // =======================================
-        // Funkce: dešifrování AES-128-CBC
-        // =======================================
+        // --- AES-128-CBC dešifrování (iv + ciphertext v hexu) ---
         function decryptAesFrame(frame, keyHex) {
-            // "AES#"<IV(32 hex)><CIPHERTEXT(hex)>
             let hexData = frame.slice(4).trim();
             let iv = Buffer.from(hexData.slice(0, 32), "hex");
             let ct = Buffer.from(hexData.slice(32), "hex");
@@ -369,34 +390,22 @@ module.exports = function (RED) {
             return decrypted.toString("ascii");
         }
 
-        // =======================================
-        // Funkce: parseContactIdPayload
-        // =======================================
+        // --- Parsování Contact-ID payload (event, zone, uživatel, …) ---
         function parseContactIdPayload(text, result) {
             let parts = text.split(/\s+/);
             parts.forEach(p => {
                 let [k, v] = p.split("=");
                 switch (k) {
-                    case "event":
-                        result.event = v;
-                        break;
-                    case "zone":
-                        result.zone = v;
-                        break;
-                    case "user":
-                        result.user = v;
-                        break;
-                    case "code":
-                        result.user = v;
-                        break;
+                    case "event": result.event = v; break;
+                    case "zone":  result.zone = v; break;
+                    case "user":  result.user = v; break;
+                    case "code":  result.user = v; break;
                 }
             });
-            result.message = `Event ${result.event}, zone ${result.zone}`;
+            result.message = `Event ${result.event}, zóna ${result.zone}`;
         }
 
-        // =======================================
-        // Funkce: lokalizace zprávy
-        // =======================================
+        // --- Lokalizace zpráv (CS/EN) ---
         function localize(eventCode, zone) {
             let msgSet = messages[language] || messages["en"];
             let base = msgSet[eventCode] || eventCode;
@@ -406,9 +415,7 @@ module.exports = function (RED) {
             return base;
         }
 
-        // =======================================
-        // Funkce: logování událostí do souboru
-        // =======================================
+        // --- Logování událostí do souboru ---
         function logEvent(sia) {
             let logline = `${new Date().toISOString()},${sia.account},${sia.event},${sia.zone},${sia.message}\n`;
             fs.appendFile("/home/nodered/sia-events.log", logline, err => {
@@ -416,9 +423,7 @@ module.exports = function (RED) {
             });
         }
 
-        // =======================================
-        // Funkce: buildAck / buildNak
-        // =======================================
+        // --- Funkce: ACK / NAK ---
         function buildAck(seq, acct) {
             return `\r\nACK ${seq || ""}\r\n`;
         }
@@ -426,9 +431,7 @@ module.exports = function (RED) {
             return `\r\nNAK ${seq || ""}\r\n`;
         }
 
-        // =======================================
-        // HTTP endpoint pro externí eventy
-        // =======================================
+        // --- HTTP endpoint pro externí eventy (volitelné) ---
         RED.httpAdmin.post("/sia-server/:id/event", RED.auth.needsPermission("sia-server.write"), function(req, res) {
             let node = RED.nodes.getNode(req.params.id);
             if (node) {
@@ -436,13 +439,18 @@ module.exports = function (RED) {
                 let sia = {
                     protocol: "EXTERNAL",
                     sequence: null,
-                    account: accountDefault,
+                    account: defaultAccount,
                     event: payload.event,
                     zone: payload.zone,
                     message: payload.message,
                     valid: true
                 };
-                node.send([{ payload: sia, raw: JSON.stringify(payload), account: accountDefault, timestamp: new Date().toISOString() }, null]);
+                node.send([{
+                    payload: sia,
+                    raw: JSON.stringify(payload),
+                    account: defaultAccount,
+                    timestamp: new Date().toISOString()
+                }, null]);
                 res.sendStatus(200);
             } else {
                 res.sendStatus(404);
