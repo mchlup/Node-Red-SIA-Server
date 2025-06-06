@@ -1,27 +1,40 @@
 <script type="text/javascript">
-    // === Registrace konfiguračního node ===
+    // ================================
+    // Registrace konfiguračního node (sia-server-config)
+    // ================================
     RED.nodes.registerType('sia-server-config', {
         category: 'config',
+        color: '#A6BBCF',
         defaults: {
-            name:     { value: "" },
-            port:     { value: 10000, required: true },
-            password: { value: "",    required: false },
-            account:  { value: "123456",    required: false }
+            name:              { value: "" },
+            port:              { value: 10002, required: true },
+            password:          { value: "",    required: false },
+            account:           { value: "",    required: false },
+            allowedEvents:     { value: "",    required: false },
+            zoneMap:           { value: "",    required: false },
+            useAes:            { value: false, required: false },
+            aesKey:            { value: "",    required: false },
+            reconnectInterval: { value: 10,    required: false },
+            language:          { value: "en",  required: false },
+            allowedUsers:      { value: "",    required: false },
+            logPath:           { value: "",    required: false }
         },
         label: function() {
             return this.name || ("SIA Config " + this.port);
         }
     });
 
-    // === Registrace hlavního node ===
+    // ================================
+    // Registrace hlavního node (sia-server)
+    // ================================
     RED.nodes.registerType('sia-server', {
         category: 'sia-server',
         color:    '#A6BBCF',
         defaults: {
             name:      { value: "" },
             config:    { type: "sia-server-config", required: true },
-            debugMode: { value: true, required: false },
-            rawOutput: { value: true, required: false }
+            debugMode: { value: false, required: false },
+            rawOutput: { value: false, required: false }
         },
         inputs:  1,
         outputs: 2,
@@ -32,9 +45,9 @@
     });
 </script>
 
-<!-- ============================================ -->
-<!-- Konfigurační node – editovací formulář       -->
-<!-- ============================================ -->
+<!-- ======================================================= -->
+<!-- Konfigurační node – editovací dialog (sia-server-config) -->
+<!-- ======================================================= -->
 <script type="text/x-red" data-template-name="sia-server-config">
     <div class="form-row">
         <label for="node-config-input-name"><i class="icon-tag"></i> Název</label>
@@ -52,11 +65,53 @@
         <label for="node-config-input-account"><i class="icon-user"></i> Číslo účtu (volitelně)</label>
         <input type="text" id="node-config-input-account">
     </div>
+    <div class="form-row">
+        <label for="node-config-input-allowedEvents"><i class="icon-list"></i> Whitelist event kódy (CSV)</label>
+        <input type="text" id="node-config-input-allowedEvents" placeholder="BA,BF,GC,...">
+        <p class="help">Seznam event kódů oddělených čárkou. Ostatní budou ignorovány.</p>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-zoneMap"><i class="icon-map-marker"></i> Mapování zón (JSON)</label>
+        <textarea id="node-config-input-zoneMap" style="width: 100%;" placeholder='{"01":"Vchod","02":"Garáž"}'></textarea>
+        <p class="help">JSON objekt: {"<kód_zóny>":"<název_zóny>", ...}</p>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-useAes"><i class="icon-lock"></i> Použít AES</label>
+        <input type="checkbox" id="node-config-input-useAes">
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-aesKey"><i class="icon-key"></i> AES Key (hex, 16B)</label>
+        <input type="text" id="node-config-input-aesKey" placeholder="např. 00112233445566778899aabbccddeeff">
+        <p class="help">Hex klíč 16 bajtů pro AES-128-CBC dešifrování.</p>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-reconnectInterval"><i class="icon-refresh"></i> Interval reconnect (s)</label>
+        <input type="number" id="node-config-input-reconnectInterval" placeholder="10">
+        <p class="help">Čas v sekundách, po kterém se pokusí znovu naslouchat, pokud dojde k chybě.</p>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-language"><i class="icon-language"></i> Jazyk</label>
+        <select id="node-config-input-language">
+            <option value="en">English</option>
+            <option value="cs">Čeština</option>
+        </select>
+        <p class="help">Překlad zpráv (poplachů) v UI a lokalizované zprávy ve výstupu.</p>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-allowedUsers"><i class="icon-user"></i> Povolení uživatelé (CSV)</label>
+        <input type="text" id="node-config-input-allowedUsers" placeholder="001,002,003">
+        <p class="help">Seznam ID uživatelů (např. kód z klávesnice), kteří mohou odesílat ARM/DISARM.</p>
+    </div>
+    <div class="form-row">
+        <label for="node-config-input-logPath"><i class="icon-folder"></i> Cesta k log souboru</label>
+        <input type="text" id="node-config-input-logPath" placeholder="/data/sia-events.log">
+        <p class="help">Plná cesta k souboru, kam se budou ukládat události.</p>
+    </div>
 </script>
 
-<!-- ============================================ -->
-<!-- Hlavní node – editovací formulář             -->
-<!-- ============================================ -->
+<!-- ======================================================= -->
+<!-- Hlavní node – editovací dialog (sia-server)            -->
+<!-- ======================================================= -->
 <script type="text/x-red" data-template-name="sia-server">
     <div class="form-row">
         <label for="node-input-name"><i class="icon-tag"></i> Název</label>
@@ -76,22 +131,32 @@
     </div>
 </script>
 
-<!-- ============================================ -->
-<!-- (Volitelně) Popis nápovědy / help text       -->
-<!-- ============================================ -->
+<!-- ======================================================= -->
+<!-- (Volitelně) Nápověda pro sia-server-config            -->
+<!-- ======================================================= -->
 <script type="text/x-red" data-help-name="sia-server-config">
+    <h3>SIA Server Config</h3>
     <p>
-        <b>SIA Server Config</b> – zde definujte globální nastavení vašeho SIA serveru:<br>
-        <u>Port:</u> TCP port, na kterém naslouchá SIA ústředna (výchozí 10002).<br>
-        <u>Heslo/PIN:</u> Volitelné, pokud ústředna očekává PIN pro připojení.<br>
-        <u>Číslo účtu:</u> Volitelné, slouží jako identifikace ústředny (např. "123456").
+        <b>Port:</b> TCP port, na kterém naslouchá ústředna.<br>
+        <b>Heslo/PIN:</b> Potvrzovací PIN (pokud GD520 vyžaduje PIN pro připojení).<br>
+        <b>Číslo účtu:</b> Identifikační číslo ústředny (např. &quot;123456&quot;).<br>
+        <b>Whitelist eventů:</b> Seznam podporovaných event kódů (oddělených čárkou), ostatní jsou ignorovány.<br>
+        <b>Mapování zón:</b> JSON formát mapující kód zóny na lidsky čitelný název.<br>
+        <b>Použít AES:</b> Zaškrtněte, pokud zprávy z GD520 jsou šifrované AES-128.<br>
+        <b>AES Key:</b> Hexadecimální klíč 16 bajtů pro dešifrování AES zpráv.<br>
+        <b>Reconnect interval:</b> Čas (v sekundách) pro opětovné restartování serveru, pokud dojde k chybě.<br>
+        <b>Jazyk:</b> Volba &quot;en&quot; nebo &quot;cs&quot; pro lokalizované hlášky.<br>
+        <b>Povolení uživatelé:</b> Seznam ID uživatelů (např. z klávesnice) povolených k ARM/DISARM.<br>
+        <b>Cesta k log souboru:</b> Kde se ukládají všechny události (CSV nebo text).
     </p>
 </script>
 
 <script type="text/x-red" data-help-name="sia-server">
+    <h3>SIA Server</h3>
     <p>
-        <b>SIA Server</b> – hlavní uzel, naslouchá na portu definovaném v &quot;Nastavení serveru&quot;.<br>
-        <u>Debug režim:</u> Pokud zaškrtnuto, ve druhém výstupu se objeví všechny neparsované nebo testovací zprávy.<br>
-        <u>Přeposílat RAW zprávy:</u> Pokud zaškrtnuto, ve druhém výstupu se objeví surová data každé přijaté zprávy (užitečné pro ladění).
+        <b>Název:</b> Volitelný popis pro zobrazení v pracovní ploše.<br>
+        <b>Nastavení serveru:</b> Vyberte nebo vytvořte <i>SIA Server Config</i> pro sdílené nastavení.<br>
+        <b>Debug režim:</b> Pokud zaškrtnuto, budou chyby a neparsované zprávy posílány do druhého výstupu.<br>
+        <b>Přeposílat RAW zprávy:</b> Pokud zaškrtnuto, do druhého výstupu se budou posílat i surová data (užitečné pro ladění).
     </p>
 </script>
