@@ -1,7 +1,7 @@
 {
   "name": "node-red-contrib-sia-server",
-  "version": "1.0.7",
-  "description": "Node-RED node for SIA DC-09 IP server (alarm receiver) with support for Honeywell Galaxy Dimension, Contact-ID, AES, polling and advanced features.",
+  "version": "1.0.8",
+  "description": "Node-RED node for SIA DC-09 IP server (alarm receiver) with full support for Honeywell Galaxy Dimension (polling, CRC, AES, keep-alive, fragmentation, diagnostic, Receiver ID, etc.).",
   "keywords": [
     "node-red",
     "sia",
@@ -11,7 +11,10 @@
     "Contact-ID",
     "AES",
     "polling",
-    "security"
+    "security",
+    "CRC",
+    "fragmentation",
+    "keepalive"
   ],
   "repository": {
     "type": "git",
